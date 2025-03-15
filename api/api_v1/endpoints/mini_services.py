@@ -1,5 +1,7 @@
+import os
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from db.session import get_db
 from models.mini_service import MiniService
@@ -13,6 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
 @router.post("/", response_model=MiniServiceInDB)
 async def create_mini_service(
     mini_service: MiniServiceCreate, 
@@ -21,29 +24,49 @@ async def create_mini_service(
 ):
     """Create a new mini service"""
     # Validate workflow structure
-    if "start_node" not in mini_service.workflow:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Workflow must contain a 'start_node' field"
-        )
-    
     if "nodes" not in mini_service.workflow:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Workflow must contain a 'nodes' dictionary"
         )
     
-    # Validate that all nodes have an agent_id and that referenced agents exist
+    # Check if node 0 exists - we'll use this as the start node
+    if "0" not in mini_service.workflow["nodes"] and 0 not in mini_service.workflow["nodes"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workflow must contain a node with ID 0 as the start node"
+        )
+    
+    # Validate the node structure and extract agent IDs
     agent_ids = set()
-    for node_id, node in mini_service.workflow["nodes"].items():
+    node_ids = set()
+    
+    for node_id_str, node in mini_service.workflow["nodes"].items():
+        # Convert node_id to int for consistent handling
+        node_id = int(node_id_str) if isinstance(node_id_str, str) else node_id_str
+        node_ids.add(node_id)
+        
+        # Check for required agent_id
         if "agent_id" not in node:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Node {node_id} must specify an agent_id"
+                detail=f"Node {node_id} is missing 'agent_id'"
             )
-        agent_ids.add(int(node["agent_id"]))
+        
+        agent_id = node.get("agent_id")
+        if agent_id is not None:  # Allow for None agent_id if needed
+            agent_ids.add(int(agent_id))
+        
+        # Validate "next" field if present
+        if "next" in node and node["next"] is not None:
+            next_node = node["next"]
+            if not isinstance(next_node, int) and not (isinstance(next_node, str) and next_node.isdigit()):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Node {node_id} has invalid 'next' value. Must be an integer node ID or null."
+                )
     
-    # Check that all referenced agents exist and belong to the current user
+    # Check that all referenced agent IDs exist and belong to the current user
     for agent_id in agent_ids:
         agent = db.query(Agent).filter(
             Agent.id == agent_id,
@@ -56,11 +79,24 @@ async def create_mini_service(
                 detail=f"Agent with ID {agent_id} not found or you don't have permission to use it"
             )
     
+    # Restructure the workflow to ensure node IDs are stored as strings
+    # (This is for compatibility with JSON serialization in the database)
+    standardized_workflow = {
+        "nodes": {}
+    }
+    
+    for node_id_str, node in mini_service.workflow["nodes"].items():
+        node_id = str(node_id_str)  # Ensure node_id is a string
+        standardized_workflow["nodes"][node_id] = {
+            "agent_id": node["agent_id"],
+            "next": node.get("next")
+        }
+    
     # Create mini service in database
     db_mini_service = MiniService(
         name=mini_service.name,
         description=mini_service.description,
-        workflow=mini_service.workflow,
+        workflow=standardized_workflow,  # Use the standardized workflow
         input_type=mini_service.input_type,
         output_type=mini_service.output_type,
         owner_id=current_user_id,
@@ -73,6 +109,141 @@ async def create_mini_service(
     db.refresh(db_mini_service)
     
     return db_mini_service
+
+@router.post("/{service_id}/run")
+async def run_mini_service(
+    service_id: int,
+    input_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user_id: int = 1  # Replace with actual user ID from authentication
+):
+    """Run a mini service with the given input"""
+    # Get the mini service
+    mini_service = db.query(MiniService).filter(
+        MiniService.id == service_id
+    ).first()
+    
+    if not mini_service:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mini service with ID {service_id} not found"
+        )
+    
+    # Extract input
+    input_value = input_data.get("input")
+    if input_value is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Input is required"
+        )
+    
+    # Create process record first to get a process ID
+    # This ensures we have a process ID before running the workflow
+    process = Process(
+        mini_service_id=mini_service.id,
+        user_id=current_user_id,
+        total_tokens={}  # Will update after processing
+    )
+    db.add(process)
+    db.commit()
+    db.refresh(process)
+    
+    # Get all agents used in this mini service's workflow
+    agent_ids = set()
+    for node_id, node in mini_service.workflow.get("nodes", {}).items():
+        agent_id = node.get("agent_id")
+        if agent_id:
+            agent_ids.add(int(agent_id))
+    
+    # Load agent instances
+    agents = {}
+    for agent_id in agent_ids:
+        agent_record = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent with ID {agent_id} not found"
+            )
+        
+        # Create agent instance
+        try:
+            agent_instance = create_agent(
+                agent_record.agent_type, 
+                agent_record.config, 
+                agent_record.system_instruction
+            )
+            agents[str(agent_id)] = agent_instance
+        except Exception as e:
+            logger.error(f"Failed to initialize agent {agent_id}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to initialize agent {agent_id}: {str(e)}"
+            )
+    
+    # Create and run the workflow processor with the updated structure
+    # We need to modify the workflow to include a start_node field for compatibility
+    workflow = mini_service.workflow.copy()
+    workflow["start_node"] = "0"  # Always start with node 0
+    
+    workflow_processor = WorkflowProcessor(agents, workflow)
+    try:
+        # Add process_id to the context
+        context = input_data.get("context", {})
+        context["process_id"] = process.id
+        
+        # Run the workflow
+        result = await workflow_processor.process(input_value, context)
+        
+        # Update the process record with token usage
+        token_usage = result.get("token_usage", {"total_tokens": 0})
+        process.total_tokens = token_usage
+        
+        # Update mini service stats
+        mini_service.run_time += 1
+        
+        # Update average token usage
+        if mini_service.average_token_usage:
+            for key, value in token_usage.items():
+                if key in mini_service.average_token_usage:
+                    # Calculate new average
+                    mini_service.average_token_usage[key] = (
+                        (mini_service.average_token_usage[key] * (mini_service.run_time - 1) + value) 
+                        / mini_service.run_time
+                    )
+                else:
+                    mini_service.average_token_usage[key] = value
+        else:
+            mini_service.average_token_usage = token_usage
+        
+        # Add process_id to the result for easy reference
+        result["process_id"] = process.id
+        
+        # If any TTS audio files were generated, include their URLs
+        audio_urls = []
+        for step_result in result.get("results", []):
+            raw_data = step_result.get("raw", {})
+            if raw_data and "audio_url" in raw_data:
+                audio_urls.append({
+                    "step": step_result.get("step"),
+                    "audio_url": raw_data["audio_url"]
+                })
+        
+        if audio_urls:
+            result["audio_urls"] = audio_urls
+            
+        db.commit()
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error processing with mini service: {str(e)}")
+        # Clean up the process record if there was an error
+        db.delete(process)
+        db.commit()
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing with mini service: {str(e)}"
+        )
 
 @router.get("/", response_model=List[MiniServiceInDB])
 async def list_mini_services(
@@ -162,17 +333,50 @@ async def delete_mini_service(
     
     return None
 
-@router.post("/{service_id}/run")
-async def run_mini_service(
+
+@router.get("/audio/{process_id}", response_class=FileResponse)
+async def get_audio_by_process(
+    process_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get audio file for a specific process"""
+    # Verify the process exists
+    process = db.query(Process).filter(Process.id == process_id).first()
+    if not process:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Process with ID {process_id} not found"
+        )
+    
+    # Construct the filename based on process ID
+    filename = f"process_{process_id}.mp3"
+    audio_path = os.path.join("tts_output", filename)
+    
+    # Check if file exists
+    if not os.path.exists(audio_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Audio file for process {process_id} not found"
+        )
+    
+    return FileResponse(
+        path=audio_path,
+        media_type="audio/mpeg",
+        filename=filename
+    )
+
+
+@router.get("/{service_id}/audio", response_model=List[Dict[str, Any]])
+async def list_service_audio_files(
     service_id: int,
-    input_data: Dict[str, Any],
     db: Session = Depends(get_db),
     current_user_id: int = 1  # Replace with actual user ID from authentication
 ):
-    """Run a mini service with the given input"""
-    # Get the mini service
+    """List all audio files generated by a mini service"""
+    # Check if mini service exists and belongs to the user
     mini_service = db.query(MiniService).filter(
-        MiniService.id == service_id
+        MiniService.id == service_id,
+        MiniService.owner_id == current_user_id
     ).first()
     
     if not mini_service:
@@ -181,84 +385,20 @@ async def run_mini_service(
             detail=f"Mini service with ID {service_id} not found"
         )
     
-    # Extract input
-    input_value = input_data.get("input")
-    if input_value is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Input is required"
-        )
+    # Get all processes for this mini service
+    processes = db.query(Process).filter(Process.mini_service_id == service_id).all()
     
-    # Get all agents used in this mini service's workflow
-    agent_ids = set()
-    for node_id, node in mini_service.workflow.get("nodes", {}).items():
-        agent_id = node.get("agent_id")
-        if agent_id:
-            agent_ids.add(int(agent_id))
+    audio_files = []
+    for process in processes:
+        filename = f"process_{process.id}.mp3"
+        audio_path = os.path.join("tts_output", filename)
+        
+        if os.path.exists(audio_path):
+            audio_files.append({
+                "process_id": process.id,
+                "created_at": process.created_at,
+                "audio_url": f"/audio/{filename}",
+                "file_size": os.path.getsize(audio_path)
+            })
     
-    # Load agent instances
-    agents = {}
-    for agent_id in agent_ids:
-        agent_record = db.query(Agent).filter(Agent.id == agent_id).first()
-        if not agent_record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Agent with ID {agent_id} not found"
-            )
-        
-        # Create agent instance
-        try:
-            agent_instance = create_agent(
-                agent_record.agent_type, 
-                agent_record.config, 
-                agent_record.system_instruction
-            )
-            agents[str(agent_id)] = agent_instance
-        except Exception as e:
-            logger.error(f"Failed to initialize agent {agent_id}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to initialize agent {agent_id}: {str(e)}"
-            )
-    
-    # Create and run the workflow processor
-    workflow_processor = WorkflowProcessor(agents, mini_service.workflow)
-    try:
-        context = input_data.get("context", {})
-        result = await workflow_processor.process(input_value, context)
-        
-        # Record the process
-        token_usage = result.get("token_usage", {"total_tokens": 0})
-        process = Process(
-            mini_service_id=mini_service.id,
-            user_id=current_user_id,
-            total_tokens=token_usage
-        )
-        db.add(process)
-        
-        # Update mini service stats
-        mini_service.run_time += 1
-        
-        # Update average token usage
-        if mini_service.average_token_usage:
-            for key, value in token_usage.items():
-                if key in mini_service.average_token_usage:
-                    # Calculate new average
-                    mini_service.average_token_usage[key] = (
-                        (mini_service.average_token_usage[key] * (mini_service.run_time - 1) + value) 
-                        / mini_service.run_time
-                    )
-                else:
-                    mini_service.average_token_usage[key] = value
-        else:
-            mini_service.average_token_usage = token_usage
-            
-        db.commit()
-        
-        return result
-    except Exception as e:
-        logger.error(f"Error processing with mini service: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing with mini service: {str(e)}"
-        )
+    return audio_files

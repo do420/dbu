@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from api.api_v1.endpoints import auth
 from db.session import engine
 from db.base import Base  # This will import all models
@@ -10,6 +11,8 @@ Base.metadata.create_all(bind=engine)
 
 # Initialize FastAPI app
 app = FastAPI(title="AI Superapp Backend")
+
+app.mount("/audio", StaticFiles(directory="tts_output"), name="audio")
 
 # Include routes
 app.include_router(api_router, prefix="/api/v1")
@@ -26,4 +29,4 @@ app.add_middleware(
 # Serve static files (CSS, JS, images)
 # Serve the index page
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=3000, reload=True)
+    uvicorn.run("main:app", host="localhost", port=3000, reload=True)

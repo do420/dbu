@@ -22,7 +22,9 @@ class WorkflowProcessor:
         """
         logger.debug(f"Starting workflow process with input: {input_data}")
         context = context or {}
-        current_step = self.workflow.get("start_node")
+        
+        # Get the start node - use the specified start_node or default to "0"
+        current_step = self.workflow.get("start_node", "0")
         current_input = input_data
         results = []
         total_token_usage = {
@@ -31,19 +33,30 @@ class WorkflowProcessor:
             "total_tokens": 0
         }
         
-        while current_step:
-            step_config = self.workflow["nodes"].get(current_step)
+        while current_step is not None:
+            # Get node configuration
+            step_config = self.workflow["nodes"].get(str(current_step))
             if not step_config:
                 logger.error(f"No step configuration found for step: {current_step}")
                 break
                 
             agent_id = step_config.get("agent_id")
+            if agent_id is None:
+                logger.error(f"No agent ID specified for step: {current_step}")
+                results.append({
+                    "step": current_step,
+                    "error": f"No agent ID specified for step: {current_step}"
+                })
+                break
+            
             agent = self.agents.get(str(agent_id))
             
             if not agent:
                 logger.error(f"Agent {agent_id} not found for step: {current_step}")
                 results.append({
                     "step": current_step,
+                    "agent_id": agent_id,
+                    "input": current_input,
                     "error": f"Agent {agent_id} not found"
                 })
                 break
@@ -51,7 +64,7 @@ class WorkflowProcessor:
             logger.debug(f"Processing step {current_step} with agent {agent_id}")
             
             try:
-                # Process with the current agent (system prompt is already part of the agent)
+                # Process with the current agent
                 agent_result = await agent.process(current_input, context)
                 
                 # Store the result
@@ -67,7 +80,7 @@ class WorkflowProcessor:
                 # Update context with the current result
                 if "step_results" not in context:
                     context["step_results"] = {}
-                context["step_results"][current_step] = agent_result.get("output")
+                context["step_results"][str(current_step)] = agent_result.get("output")
                 
                 # Update token usage
                 if "token_usage" in agent_result:
@@ -85,21 +98,15 @@ class WorkflowProcessor:
                 })
                 break
             
-            # Get the next step based on conditions
-            next_steps = step_config.get("next")
-            if not next_steps:
+            # Get the next step directly from the "next" field
+            next_step = step_config.get("next")
+            
+            # If next_step is None, we're done
+            if next_step is None:
                 break
                 
-            if isinstance(next_steps, str):
-                current_step = next_steps
-            elif isinstance(next_steps, dict):
-                # Handle conditional routing based on agent output
-                # For simplicity, we're going with the default route
-                current_step = next_steps.get("default")
-            else:
-                break
-                
-            # Update the input for next agent
+            # Update the current step and input
+            current_step = str(next_step)  # Ensure it's a string for consistency
             current_input = agent_result.get("output")
         
         # Safely check for final output
