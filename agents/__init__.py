@@ -2,6 +2,7 @@ from typing import Dict, Any
 from .gemini_agent import GeminiAgent
 from .openai_agent import OpenAIAgent
 from .tts_agent import TTSAgent
+from .bark_agent import BarkTTSAgent
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,8 @@ def create_agent(agent_type: str, config: Dict[str, Any], system_instruction: st
         return OpenAIAgent(config, system_instruction)
     elif agent_type.lower() == "text2speech" or agent_type.lower() == "tts":
         return TTSAgent(config, system_instruction)
+    elif agent_type.lower() == "bark_tts" or agent_type.lower() == "suno-bark":
+        return BarkTTSAgent(config, system_instruction)
     else:
         logger.error(f"Unknown agent type: {agent_type}")
         raise ValueError(f"Unknown agent type: {agent_type}")
