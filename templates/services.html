@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Mini Services - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3B82F6',
+                        secondary: '#10B981',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-100 font-sans">
+<nav class="bg-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4">
+        <div class="flex justify-between">
+            <div class="flex space-x-7">
+                <div>
+                    <a href="#" class="flex items-center py-4 px-2">
+                        <span class="font-semibold text-gray-500 text-lg">AI Mini Services</span>
+                    </a>
+                </div>
+            </div>
+            <div class="hidden md:flex items-center space-x-3">
+                <a href="#" class="py-2 px-2 font-medium text-gray-500 rounded hover:bg-primary hover:text-white transition duration-300">Dashboard</a>
+                <a href="#" class="py-2 px-2 font-medium text-gray-500 rounded hover:bg-primary hover:text-white transition duration-300">Profile</a>
+                <a href="/" class="py-2 px-2 font-medium text-gray-500 rounded hover:bg-primary hover:text-white transition duration-300">Logout</a>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<div class="container mx-auto px-4 py-8">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-4xl font-bold text-gray-800">AI Mini Services Dashboard</h1>
+        <a href="create-service" class="bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 transition duration-300">
+            Create New Service
+        </a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- AI Service 1 -->
+        <div class="bg-white rounded-lg shadow-md p-6 transform hover:scale-105 transition duration-300">
+            <h2 class="text-xl font-semibold mb-4 text-primary">Text Generation</h2>
+            <p class="text-gray-600 mb-4">Generate creative text based on your input.</p>
+            <textarea id="textInput1" class="w-full p-2 border rounded mb-2" rows="3" placeholder="Enter your prompt here..."></textarea>
+            <button onclick="generateText('textInput1', 'textOutput1')" class="bg-primary text-white font-bold py-2 px-4 rounded hover:bg-blue-600 transition duration-300">Generate</button>
+            <div id="textOutput1" class="mt-4 p-2 bg-gray-100 rounded"></div>
+        </div>
+
+        <!-- AI Service 2 -->
+        <div class="bg-white rounded-lg shadow-md p-6 transform hover:scale-105 transition duration-300">
+            <h2 class="text-xl font-semibold mb-4 text-secondary">Image Description</h2>
+            <p class="text-gray-600 mb-4">Get a description of the uploaded image.</p>
+            <input type="file" id="imageInput" accept="image/*" class="mb-2">
+            <button onclick="describeImage()" class="bg-secondary text-white font-bold py-2 px-4 rounded hover:bg-green-600 transition duration-300">Describe</button>
+            <div id="imageOutput" class="mt-4 p-2 bg-gray-100 rounded"></div>
+        </div>
+
+        <!-- AI Service 3 -->
+        <div class="bg-white rounded-lg shadow-md p-6 transform hover:scale-105 transition duration-300">
+            <h2 class="text-xl font-semibold mb-4 text-primary">Sentiment Analysis</h2>
+            <p class="text-gray-600 mb-4">Analyze the sentiment of your text.</p>
+            <textarea id="textInput2" class="w-full p-2 border rounded mb-2" rows="3" placeholder="Enter your text here..."></textarea>
+            <button onclick="analyzeSentiment('textInput2', 'textOutput2')" class="bg-primary text-white font-bold py-2 px-4 rounded hover:bg-blue-600 transition duration-300">Analyze</button>
+            <div id="textOutput2" class="mt-4 p-2 bg-gray-100 rounded"></div>
+        </div>
+    </div>
+
+    <!-- User Profile Section -->
+    <div class="mt-12 bg-white rounded-lg shadow-md p-6">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">User Profile</h2>
+        <div class="flex items-center space-x-4 mb-4">
+            <img id="userAvatar" src="https://via.placeholder.com/100" alt="User Avatar" class="w-20 h-20 rounded-full">
+            <div>
+                <h3 id="userName" class="text-xl font-semibold"></h3>
+                <p id="userEmail" class="text-gray-600"></p>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <p class="text-gray-600">Location: <span id="userLocation" class="font-semibold"></span></p>
+                <p class="text-gray-600">Member Since: <span id="userMemberSince" class="font-semibold"></span></p>
+            </div>
+            <div>
+                <p class="text-gray-600">Services Used: <span id="userServicesUsed" class="font-semibold"></span></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function generateText(inputId, outputId) {
+        const input = document.getElementById(inputId).value;
+        const output = document.getElementById(outputId);
+        // Simulating AI text generation
+        output.innerHTML = `Generated text based on your input: "${input}"<br>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`;
+    }
+
+    function describeImage() {
+        const input = document.getElementById('imageInput');
+        const output = document.getElementById('imageOutput');
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // Simulating AI image description
+                output.innerHTML = "The image appears to show a landscape with mountains and a lake. There are trees in the foreground and a clear blue sky.";
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+
+    function analyzeSentiment(inputId, outputId) {
+        const input = document.getElementById(inputId).value;
+        const output = document.getElementById(outputId);
+        // Simulating AI sentiment analysis
+        const sentiments = ['Very Negative', 'Negative', 'Neutral', 'Positive', 'Very Positive'];
+        const randomSentiment = sentiments[Math.floor(Math.random() * sentiments.length)];
+        output.innerHTML = `Sentiment Analysis Result: ${randomSentiment}`;
+    }
+
+    // Simulating user data fetch
+    function fetchUserData() {
+        // In a real application, you would fetch this data from a server
+        const userData = {
+            name: "JaneSmith",
+            email: "jane.smith@example.com",
+            avatar: "https://via.placeholder.com/100",
+            location: "London, UK",
+            memberSince: "March 15, 2023",
+            servicesUsed: 27
+        };
+
+        document.getElementById('userName').textContent = userData.name;
+        document.getElementById('userEmail').textContent = userData.email;
+        document.getElementById('userAvatar').src = userData.avatar;
+        document.getElementById('userLocation').textContent = userData.location;
+        document.getElementById('userMemberSince').textContent = userData.memberSince;
+        document.getElementById('userServicesUsed').textContent = userData.servicesUsed;
+    }
+
+    // Call fetchUserData when the page loads
+    window.onload = fetchUserData;
+</script>
+</body>
+</html>
+
