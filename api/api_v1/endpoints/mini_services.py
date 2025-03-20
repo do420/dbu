@@ -350,7 +350,7 @@ async def get_audio_by_process(
     
     # Construct the filename based on process ID
     filename = f"process_{process_id}.mp3"
-    audio_path = os.path.join("tts_output", filename)
+    audio_path = os.path.join("_OUTPUT", filename)
     
     # Check if file exists
     if not os.path.exists(audio_path):
@@ -391,7 +391,7 @@ async def list_service_audio_files(
     audio_files = []
     for process in processes:
         filename = f"process_{process.id}.mp3"
-        audio_path = os.path.join("tts_output", filename)
+        audio_path = os.path.join("_OUTPUT", filename)
         
         if os.path.exists(audio_path):
             audio_files.append({

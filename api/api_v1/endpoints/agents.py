@@ -2,6 +2,7 @@ import os
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from agents.transribe_agent import TranscribeAgent
 from db.session import get_db
 from models.agent import Agent
 from models.api_key import APIKey
@@ -454,4 +455,156 @@ async def generate_bark_speech(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing with Bark TTS agent: {str(e)}"
+        )
+    
+
+
+@router.get("/models/transcribe", response_model=List[str])
+async def list_transcribe_models():
+    """List all available WhisperX transcription models"""
+
+    models = TranscribeAgent.supported_models()
+    return models
+
+@router.get("/languages/transcribe", response_model=Dict[str, str])
+async def list_transcribe_languages():
+    """List all supported languages for transcription"""
+
+    languages = TranscribeAgent.supported_languages()
+    return languages
+
+@router.post("/{agent_id}/transcribe", response_model=Dict[str, Any])
+async def transcribe_media(
+    agent_id: int,
+    input_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user_id: int = 1  # Replace with actual user ID from authentication
+):
+    """
+    Transcribe a media file from the media directory
+    
+    Input data should include:
+    - filename: name of the file in the media directory
+    - language: language code (optional, defaults to 'en')
+    - include_timestamps: whether to include timestamps in the output (optional)
+    """
+    # Get the agent
+    db_agent = db.query(Agent).filter(
+        Agent.id == agent_id,
+        Agent.owner_id == current_user_id
+    ).first()
+    
+    if not db_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent with ID {agent_id} not found"
+        )
+    
+    # Verify this is a transcribe agent
+    if db_agent.agent_type not in ["transcribe", "whisperx"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent with ID {agent_id} is not a transcription agent"
+        )
+    
+    # Get filename and validate
+    filename = input_data.get("filename")
+    if not filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename is required in the input data"
+        )
+    
+    # Build the media file path
+    media_dir = "media"
+    file_path = os.path.join(media_dir, filename)
+    
+    # Check if the file exists
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found in media directory: {filename}"
+        )
+    
+    # Get language from input data or use default
+    language = input_data.get("language", "en")
+    include_timestamps = input_data.get("include_timestamps", False)
+    
+    # Create a process record for this operation
+    process = Process(
+        user_id=current_user_id,
+        total_tokens={},  # No tokens for transcription
+        mini_service_id=-1  # Direct agent use, not part of a service
+    )
+    db.add(process)
+    db.commit()
+    db.refresh(process)
+    
+    # Update agent config with additional parameters if provided
+    config = db_agent.config.copy()
+    if include_timestamps is not None:
+        config["include_timestamps"] = include_timestamps
+    
+    # Create agent instance
+    try:
+        agent_instance = create_agent(
+            db_agent.agent_type, 
+            config, 
+            db_agent.system_instruction
+        )
+    except Exception as e:
+        # Clean up the process record
+        db.delete(process)
+        db.commit()
+        
+        logger.error(f"Failed to initialize transcription agent {agent_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initialize transcription agent {agent_id}: {str(e)}"
+        )
+    
+    # Process with the agent
+    try:
+        # Add process_id to context
+        context = {"process_id": process.id, "language": language}
+        
+        # Prepare input data
+        transcribe_input = {
+            "file_path": file_path,
+            "language": language
+        }
+        
+        # Call the agent with the file path
+        result = await agent_instance.process(transcribe_input, context)
+        
+        if "error" in result:
+            # Clean up the process record
+            db.delete(process)
+            db.commit()
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+        
+        # Add process_id to the result
+        result["process_id"] = process.id
+        
+        # Add the original filename to the result
+        result["original_filename"] = filename
+        
+        db.commit()
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Clean up the process record
+        db.delete(process)
+        db.commit()
+        
+        logger.error(f"Error during transcription: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error during transcription: {str(e)}"
         )

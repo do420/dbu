@@ -13,7 +13,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Generate a key for Fernet encryption
 #FERNET_KEY = os.getenv("SECRET_KEY")
 #random key:
-FERNET_KEY = Fernet.generate_key()
+FERNET_KEY = "W7KtUnP-4-ShzOpaJ_BVEeojck4igjAmOmPZ1PWtYSE="
 cipher_suite = Fernet(FERNET_KEY)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

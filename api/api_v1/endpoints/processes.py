@@ -10,14 +10,14 @@ router = APIRouter()
 @router.get("/", response_model=List[ProcessInDB])
 async def list_processes(
     skip: int = 0, 
-    limit: int = 100, 
+    limit: int = 10, 
     db: Session = Depends(get_db),
     current_user_id: int = 1  # Replace with actual user ID from authentication
 ):
-    """List all processes for the current user"""
+    """List the latest processes for the current user"""
     processes = db.query(Process).filter(
         Process.user_id == current_user_id
-    ).offset(skip).limit(limit).all()
+    ).order_by(Process.id.desc()).offset(skip).limit(limit).all()
     
     return processes
 

@@ -20,7 +20,7 @@ class BarkTTSAgent(BaseAgent):
         super().__init__(config, system_instruction)
         
         # Set default output directory
-        self.output_dir = self.config.get("output_dir", "tts_output")
+        self.output_dir = self.config.get("output_dir", "_OUTPUT")
         os.makedirs(self.output_dir, exist_ok=True)
         
         # Set voice parameters if specified
