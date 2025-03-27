@@ -12,9 +12,15 @@ async def list_processes(
     skip: int = 0, 
     limit: int = 10, 
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None  # Replace with actual user ID from authentication
 ):
     """List the latest processes for the current user"""
+
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     processes = db.query(Process).filter(
         Process.user_id == current_user_id
     ).order_by(Process.id.desc()).offset(skip).limit(limit).all()
@@ -25,9 +31,14 @@ async def list_processes(
 async def get_process(
     process_id: int, 
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None # Replace with actual user ID from authentication
 ):
     """Get a specific process by ID"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     process = db.query(Process).filter(
         Process.id == process_id,
         Process.user_id == current_user_id

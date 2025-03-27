@@ -12,9 +12,15 @@ router = APIRouter()
 async def create_api_key(
     api_key: APIKeyCreate, 
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual auth
+    current_user_id: int = None  # Remove default value
 ):
     """Create a new API key"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
     # Encrypt the API key before storing
     encrypted_key = encrypt_api_key(api_key.api_key)
     
@@ -32,9 +38,14 @@ async def create_api_key(
 @router.get("/", response_model=List[APIKeyInDB])
 async def list_api_keys(
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual auth
+    current_user_id: int = None  # Replace with actual auth
 ):
     """List all API keys for the current user"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     keys = db.query(APIKey).filter(APIKey.user_id == current_user_id).all()
     return keys
 
@@ -42,9 +53,14 @@ async def list_api_keys(
 async def delete_api_key(
     key_id: int,
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual auth
+    current_user_id: int = None  # Replace with actual auth
 ):
     """Delete an API key"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     db_key = db.query(APIKey).filter(
         APIKey.id == key_id,
         APIKey.user_id == current_user_id

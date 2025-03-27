@@ -20,9 +20,14 @@ router = APIRouter()
 async def create_agent_endpoint(
     agent: AgentCreate, 
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None # Replace with actual user ID from authentication
 ):
     """Create a new agent"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     # Validate agent input and output types
     valid_types = ["text", "image", "sound"]
     if agent.input_type not in valid_types:
@@ -77,9 +82,14 @@ async def list_agents(
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None  # Replace with actual user ID from authentication
 ):
     """List all agents owned by the current user"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     agents = db.query(Agent).filter(
         Agent.owner_id == current_user_id
     ).offset(skip).limit(limit).all()
@@ -89,9 +99,14 @@ async def list_agents(
 async def get_agent(
     agent_id: int, 
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None # Replace with actual user ID from authentication
 ):
     """Get a specific agent by ID"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     agent = db.query(Agent).filter(
         Agent.id == agent_id,
         Agent.owner_id == current_user_id
@@ -109,9 +124,14 @@ async def update_agent(
     agent_id: int,
     agent_update: AgentCreate,
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None  # Replace with actual user ID from authentication
 ):
     """Update an existing agent"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     db_agent = db.query(Agent).filter(
         Agent.id == agent_id,
         Agent.owner_id == current_user_id
@@ -139,9 +159,14 @@ async def update_agent(
 async def delete_agent(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None  # Replace with actual user ID from authentication
 ):
     """Delete an agent"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     db_agent = db.query(Agent).filter(
         Agent.id == agent_id,
         Agent.owner_id == current_user_id
@@ -163,9 +188,14 @@ async def run_agent(
     agent_id: int,
     input_data: Dict[str, Any],
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None  # Replace with actual user ID from authentication
 ):
     """Run a single agent with the given input"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     # Get the agent
     db_agent = db.query(Agent).filter(
         Agent.id == agent_id,
@@ -244,9 +274,14 @@ async def generate_speech(
     agent_id: int,
     input_data: Dict[str, Any],
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None  # Replace with actual user ID from authentication
 ):
     """Generate speech from text using a TTS agent"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     # Get the agent
     db_agent = db.query(Agent).filter(
         Agent.id == agent_id,
@@ -357,9 +392,14 @@ async def generate_bark_speech(
     agent_id: int,
     input_data: Dict[str, Any],
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = None  # Replace with actual user ID from authentication
 ):
     """Generate speech from text using the Bark TTS agent"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
     # Get the agent
     db_agent = db.query(Agent).filter(
         Agent.id == agent_id,
