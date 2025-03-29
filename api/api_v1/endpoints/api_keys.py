@@ -47,6 +47,9 @@ async def list_api_keys(
             detail="current_user_id parameter is required"
         )
     keys = db.query(APIKey).filter(APIKey.user_id == current_user_id).all()
+    
+    for key in keys:
+        key.api_key = decrypt_api_key(key.api_key)
     return keys
 
 @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
