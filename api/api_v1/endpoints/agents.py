@@ -85,14 +85,15 @@ async def list_agents(
     current_user_id: int = None  # Replace with actual user ID from authentication
 ):
     """List all agents owned by the current user"""
-    if current_user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="current_user_id parameter is required"
-        )
-    agents = db.query(Agent).filter(
-        Agent.owner_id == current_user_id
-    ).offset(skip).limit(limit).all()
+    #if current_user_id is None:
+    #    raise HTTPException(
+    #        status_code=status.HTTP_401_UNAUTHORIZED,
+    #        detail="current_user_id parameter is required"
+    #    )
+    #.filter(
+    #    Agent.owner_id == current_user_id
+    #)
+    agents = db.query(Agent).offset(skip).limit(limit).all()
     return agents
 
 @router.get("/{agent_id}", response_model=AgentInDB)
@@ -102,14 +103,14 @@ async def get_agent(
     current_user_id: int = None # Replace with actual user ID from authentication
 ):
     """Get a specific agent by ID"""
-    if current_user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="current_user_id parameter is required"
-        )
+    #if current_user_id is None:
+    #    raise HTTPException(
+    #        status_code=status.HTTP_401_UNAUTHORIZED,
+    #        detail="current_user_id parameter is required"
+    #    )
     agent = db.query(Agent).filter(
         Agent.id == agent_id,
-        Agent.owner_id == current_user_id
+       #Agent.owner_id == current_user_id
     ).first()
     
     if not agent:
@@ -199,7 +200,7 @@ async def run_agent(
     # Get the agent
     db_agent = db.query(Agent).filter(
         Agent.id == agent_id,
-        Agent.owner_id == current_user_id
+        #Agent.owner_id == current_user_id
     ).first()
     
     if not db_agent:
