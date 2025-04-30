@@ -514,6 +514,7 @@ async def list_transcribe_languages():
     languages = TranscribeAgent.supported_languages()
     return languages
 
+
 @router.post("/{agent_id}/transcribe", response_model=Dict[str, Any])
 async def transcribe_media(
     agent_id: int,
@@ -648,4 +649,80 @@ async def transcribe_media(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error during transcription: {str(e)}"
+        )
+    
+
+@router.post("/{agent_id}/run/image")
+async def run_image_agent(
+    agent_id: int,
+    input_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user_id: int = None  # Replace with actual user ID from authentication
+):
+    """Run a Gemini text-to-image agent with the given prompt."""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    # Get the agent
+    db_agent = db.query(Agent).filter(
+        Agent.id == agent_id,
+        #Agent.owner_id == current_user_id
+    ).first()
+
+    if not db_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent with ID {agent_id} not found"
+        )
+
+    if db_agent.agent_type.lower() != "gemini_text2image":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent with ID {agent_id} is not a Gemini text-to-image agent"
+        )
+
+    # Extract the image generation prompt
+    prompt = input_data.get("prompt", "")
+    if not prompt:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image generation prompt is required"
+        )
+
+    # Create the GeminiImageGeneration agent instance
+    try:
+        config = db_agent.config.copy()
+        if "api_key" not in config:
+            api_key = db.query(APIKey).filter(
+                APIKey.user_id == current_user_id,
+                APIKey.provider == "gemini" # API key provider is still "gemini"
+            ).first()
+            if api_key:
+                decrypted_key = decrypt_api_key(api_key.api_key)
+                config["api_key"] = decrypted_key
+
+        agent_instance = create_agent(
+            db_agent.agent_type,
+            config,
+            db_agent.system_instruction
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize Gemini image agent {agent_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initialize Gemini image agent {agent_id}: {str(e)}"
+        )
+
+    # Process the image generation prompt
+    try:
+        context = input_data.get("context", {})
+        result = await agent_instance.process(prompt, context)
+        return result
+    except Exception as e:
+        logger.error(f"Error processing image generation with agent: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing image generation with agent: {str(e)}"
         )
