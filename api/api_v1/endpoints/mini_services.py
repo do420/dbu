@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from db.session import get_db
 from models.mini_service import MiniService
 from models.agent import Agent
@@ -348,21 +349,66 @@ async def delete_mini_service(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="current_user_id parameter is required"
         )
-    db_mini_service = db.query(MiniService).filter(
-        MiniService.id == service_id,
-        MiniService.owner_id == current_user_id
-    ).first()
+    #db_mini_service = db.query(MiniService).filter(
+        #MiniService.id == service_id,
+        #MiniService.owner_id == current_user_id
+    #).first()
     
-    if not db_mini_service:
+    #if not db_mini_service:
+        #raise HTTPException(
+            #status_code=status.HTTP_404_NOT_FOUND,
+            #detail=f"Mini service with ID {service_id} not found"
+        #)
+    
+    #db.delete(db_mini_service)
+    #db.commit()
+    
+    #return None
+try:
+        # Start a transaction
+        with db.begin():
+            # First, check if the mini-service exists and belongs to the user
+            mini_service = db.execute(
+                select(MiniService).where(
+                    MiniService.id == service_id,
+                    MiniService.owner_id == current_user_id
+                )
+            ).scalar_one_or_none()
+
+            if not mini_service:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Mini-service {service_id} not found or you don't have permission to delete it"
+                )
+
+            # Find all related processes
+            related_processes = db.execute(
+                select(Process).where(Process.mini_service_id == service_id)
+            ).scalars().all()
+
+            # Delete all related processes first
+            for process in related_processes:
+                db.delete(process)
+
+            # Now delete the mini-service
+            db.delete(mini_service)
+            
+            # Commit the transaction
+            db.commit()
+
+        return None
+
+    except Exception as e:
+        logger.error(f"Error deleting mini-service {service_id}: {str(e)}")
+        db.rollback()
+        
+        if isinstance(e, HTTPException):
+            raise e
+        
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mini service with ID {service_id} not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete mini-service: {str(e)}"
         )
-    
-    db.delete(db_mini_service)
-    db.commit()
-    
-    return None
 
 
 @router.get("/audio/{process_id}", response_class=FileResponse)
