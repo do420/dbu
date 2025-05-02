@@ -155,7 +155,6 @@ async def update_agent(
     db.refresh(db_agent)
     
     return db_agent
-
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent(
     agent_id: int,
@@ -177,6 +176,17 @@ async def delete_agent(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent with ID {agent_id} not found"
+        )
+    
+    # Check if the agent is used in any mini-service
+    mini_service_usage = db.query(Process).filter(
+        Process.mini_service_id == agent_id
+    ).first()
+    
+    if mini_service_usage:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent with ID {agent_id} is used in a mini-service and cannot be deleted"
         )
     
     db.delete(db_agent)
