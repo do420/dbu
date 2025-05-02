@@ -364,7 +364,7 @@ async def delete_mini_service(
     #db.commit()
     
     #return None
-try:
+    try:
         # Start a transaction
         with db.begin():
             # First, check if the mini-service exists and belongs to the user
