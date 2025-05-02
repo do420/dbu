@@ -18,19 +18,7 @@ router = APIRouter()
 
 
 
-@router.get("/types", response_model=List[str])
-async def get_mini_service_types():
-    """Get a list of available mini-service types"""
-    # Define the available mini-service types based on agent types
-    mini_service_types = [
-        "gemini",
-        "openai",
-        "edge_tts",
-        "bark_tts",
-        "transcribe",
-        "gemini_text2image"
-    ]
-    return mini_service_types
+
 
 
 @router.post("/", response_model=MiniServiceInDB)

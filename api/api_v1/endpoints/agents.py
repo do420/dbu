@@ -16,6 +16,22 @@ from fastapi.responses import FileResponse
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+@router.get("/types", response_model=List[str])
+async def get_agent_types():
+    """Get a list of available agent types"""
+    # Define the available agent types
+    agent_types = [
+        "gemini",
+        "openai",
+        "edge_tts",
+        "bark_tts",
+        "transcribe",
+        "gemini_text2image"
+    ]
+    return agent_types
+
+
 @router.post("/", response_model=AgentInDB)
 async def create_agent_endpoint(
     agent: AgentCreate, 
