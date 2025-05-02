@@ -22,11 +22,11 @@ def create_agent(agent_type: str, config: Dict[str, Any], system_instruction: st
         return GeminiAgent(config, system_instruction)
     elif agent_type.lower() == "openai":
         return OpenAIAgent(config, system_instruction)
-    elif agent_type.lower() == "text2speech" or agent_type.lower() == "tts":
+    elif agent_type.lower() == "edge_tts":
         return TTSAgent(config, system_instruction)
-    elif agent_type.lower() == "bark_tts" or agent_type.lower() == "suno-bark":
+    elif agent_type.lower() == "bark_tts":
         return BarkTTSAgent(config, system_instruction)
-    elif agent_type.lower() == "transcribe" or agent_type.lower() == "whisperx":
+    elif agent_type.lower() == "transcribe":
         return TranscribeAgent(config, system_instruction)
     elif agent_type.lower() == "gemini_text2image":
         return GeminiImageGeneration(config, system_instruction)
