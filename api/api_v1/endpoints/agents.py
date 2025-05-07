@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from agents.transribe_agent import TranscribeAgent
+from core.log_utils import create_log
 from db.session import get_db
 from models.agent import Agent
 from models.api_key import APIKey
@@ -86,6 +87,12 @@ async def create_agent_endpoint(
         output_type=agent.output_type,
         owner_id=current_user_id
     )
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=0,  # 0: info
+        description=f"Created agent '{agent.name}'"
+    )
     
     db.add(db_agent)
     db.commit()
@@ -166,6 +173,13 @@ async def update_agent(
     db_agent.config = agent_update.config
     db_agent.input_type = agent_update.input_type
     db_agent.output_type = agent_update.output_type
+
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=0,  # 0: info
+        description=f"Updated agent '{agent_update.name}'"
+    )
     
     db.commit()
     db.refresh(db_agent)
@@ -205,8 +219,18 @@ async def delete_agent(
             detail=f"Agent with ID {agent_id} is used in a mini-service and cannot be deleted"
         )
     
+
+
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=0,  # 0: info
+        description=f"Deleted agent '{db_agent.name}'"
+    )
+
     db.delete(db_agent)
     db.commit()
+    
     
     return None
 

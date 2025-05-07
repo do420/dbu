@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from core.log_utils import create_log
 from db.session import get_db
 from models.mini_service import MiniService
 from models.agent import Agent
@@ -113,6 +114,14 @@ async def create_mini_service(
         average_token_usage={},
         run_time=0
     )
+
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=0,  # 0: info
+        description=f"Created a new mini-service: '{mini_service.name}'"
+    )
+
     
     db.add(db_mini_service)
     db.commit()
@@ -245,6 +254,13 @@ async def run_mini_service(
         
         if audio_urls:
             result["audio_urls"] = audio_urls
+
+        create_log(
+            db=db,
+            user_id=current_user_id,
+            log_type=0,  # 0: info
+            description=f"Succesfully run a mini-service: '{mini_service.name}'"
+        )
             
         db.commit()
         
@@ -393,6 +409,13 @@ async def delete_mini_service(
             # Delete all related processes first
             for process in related_processes:
                 db.delete(process)
+
+            create_log(
+                db=db,
+                user_id=current_user_id,
+                log_type=0,  # 0: info
+                description=f"Deleted a mini-service: '{mini_service.name}'"
+            )
 
             # Now delete the mini-service
             db.delete(mini_service)
