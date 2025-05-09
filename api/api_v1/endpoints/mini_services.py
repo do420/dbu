@@ -76,18 +76,19 @@ async def create_mini_service(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Node {node_id} has invalid 'next' value. Must be an integer node ID or null."
                 )
-    
-    # Check that all referenced agent IDs exist and belong to the current user
+     # Check that the agent exists and belongs to the current user
+     # Check that all referenced agent IDs exist
     for agent_id in agent_ids:
-        agent = db.query(Agent).filter(
-            Agent.id == agent_id,
-            Agent.owner_id == current_user_id
-        ).first()
-        
+        #agent = db.query(Agent).filter(
+         #   Agent.id == agent_id,
+          #  Agent.owner_id == current_user_id
+        #).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Agent with ID {agent_id} not found or you don't have permission to use it"
+                #detail=f"Agent with ID {agent_id} not found or you don't have permission to use it"
+                detail=f"Agent with ID {agent_id} not found"
             )
     
     # Restructure the workflow to ensure node IDs are stored as strings
