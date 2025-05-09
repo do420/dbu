@@ -1,3 +1,4 @@
+from asyncio import subprocess
 from typing import Dict, Any, List, Optional
 import os
 import asyncio
@@ -23,7 +24,7 @@ class TranscribeAgent(BaseAgent):
         os.makedirs(self.output_dir, exist_ok=True)
         
         # Set transcription parameters
-        self.model_name = self.config.get("model_name", "large-v3")
+        self.model_name = self.config.get("model_name", "small")
         self.device = self.config.get("device", "cuda")  # 'cuda' or 'cpu'
         self.compute_type = self.config.get("compute_type", "float16")  # 'float16', 'float32', 'int8'
         
@@ -60,7 +61,25 @@ class TranscribeAgent(BaseAgent):
         
         #file path is not output + file_path
         file_path = os.path.join("_INPUT", file_path)
+        
+        # If file is .mp4, extract audio to a temporary .wav file
+        if file_path.lower().endswith(".mp4"):
+            audio_path = file_path.rsplit(".", 1)[0] + ".wav"
+            if not os.path.exists(audio_path):
+                try:
+                    # Use ffmpeg to extract audio
+                    subprocess.run([
+                        "ffmpeg", "-y", "-i", file_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path
+                    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"Failed to extract audio from video: {e.stderr.decode()}")
+                    return {
+                        "error": f"Failed to extract audio from video: {e.stderr.decode()}",
+                        "output": f"Error: Failed to extract audio from video"
+                    }
+            file_path = audio_path
 
+        
 
         if not file_path or not os.path.exists(file_path):
             return {

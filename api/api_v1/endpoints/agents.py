@@ -46,7 +46,7 @@ async def create_agent_endpoint(
             detail="current_user_id parameter is required"
         )
     # Validate agent input and output types
-    valid_types = ["text", "image", "sound"]
+    valid_types = ["text", "image", "sound", "video", "document"]
     if agent.input_type not in valid_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -583,7 +583,6 @@ async def transcribe_media(
     # Get the agent
     db_agent = db.query(Agent).filter(
         Agent.id == agent_id,
-        Agent.owner_id == current_user_id
     ).first()
     
     if not db_agent:
@@ -608,14 +607,14 @@ async def transcribe_media(
         )
     
     # Build the media file path
-    media_dir = "media"
-    file_path = os.path.join(media_dir, filename)
+    input_dir = "_INPUT"
+    file_path = os.path.join(input_dir, filename)
     
     # Check if the file exists
     if not os.path.exists(file_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found in media directory: {filename}"
+            detail=f"File not found in _INPUT directory: {filename}"
         )
     
     # Get language from input data or use default
