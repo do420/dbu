@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from api.api_v1.endpoints import auth
+from api.api_v1.endpoints import auth, processes
 from db.session import engine
 from db.base import Base  # This will import all models
 import uvicorn
@@ -17,6 +17,7 @@ app.mount("/_OUTPUT", StaticFiles(directory="_OUTPUT"), name="_OUTPUT")
 # Include routes
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1/auth")
+app.include_router(processes.router, prefix="/api/v1/processes")
 
 app.add_middleware( 
     CORSMiddleware,
