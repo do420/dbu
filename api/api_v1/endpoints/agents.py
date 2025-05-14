@@ -63,7 +63,12 @@ async def get_agent_types():
             "type": "document_parser",
             "input_type": "document",
             "output_type": "text"
-        }
+        },
+        {
+            "type": "custom_endpoint_llm",
+            "input_type": "text",
+            "output_type": "text" 
+        },
     ]
     return agent_types
 
