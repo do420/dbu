@@ -67,14 +67,14 @@ async def get_agent_types():
     ]
     return agent_types
 
-
 @router.post("/", response_model=AgentInDB)
 async def create_agent_endpoint(
     agent: AgentCreate, 
     db: Session = Depends(get_db),
-    current_user_id: int = None 
+    current_user_id: int = None,
+    enhance_prompt: int = 0  # 0 or 1, or use bool if preferred
 ):
-    """Create a new agent"""
+    """Create a new agent, optionally enhancing the system prompt using Gemini."""
     if current_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -87,35 +87,81 @@ async def create_agent_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid input_type. Must be one of: {valid_types}"
         )
-    
     if agent.output_type not in valid_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid output_type. Must be one of: {valid_types}"
         )
-    
+
     # If agent uses an API key, verify it exists
     if agent.agent_type in ["gemini", "openai"] and "api_key" not in agent.config:
-        # Try to load from user's API keys
         api_key = db.query(APIKey).filter(
             APIKey.user_id == current_user_id,
             APIKey.provider == agent.agent_type
         ).first()
-        
         if not api_key:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"No API key found for {agent.agent_type}. Please add an API key first."
             )
-        
-        # Decrypt and add the API key to the config
         decrypted_key = decrypt_api_key(api_key.api_key)
         agent.config["api_key"] = decrypted_key
-    
+
+    # --- ENHANCE SYSTEM PROMPT FEATURE ---
+    enhanced_prompt = agent.system_instruction
+    if enhance_prompt:
+        # Get user's Gemini API key
+        gemini_api_key_obj = db.query(APIKey).filter(
+            APIKey.user_id == current_user_id,
+            APIKey.provider == "gemini"
+        ).first()
+        if not gemini_api_key_obj:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No Gemini API key found for prompt enhancement."
+            )
+        gemini_api_key = decrypt_api_key(gemini_api_key_obj.api_key)
+        # Prepare enhancement prompt
+        enhancement_request = (
+            f"You are an expert prompt engineer. "
+            f"Given the following agent details, enhance and improve the system prompt for optimal performance. "
+            f"Agent Name: {agent.name}\n"
+            f"Description: {agent.system_instruction}\n"
+            f"Type: {agent.agent_type}\n"
+            f"Input Type: {agent.input_type}\n"
+            f"Output Type: {agent.output_type}\n"
+            f"Original System Prompt: {agent.system_instruction}\n\n"
+            f"Return ONLY the improved system prompt."
+        )
+        # Use Gemini to enhance the prompt
+        import google.generativeai as genai
+        genai.configure(api_key=gemini_api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        try:
+            response = model.generate_content(enhancement_request)
+            enhanced_prompt = response.text.strip() if hasattr(response, "text") else str(response)
+            # Log enhancement
+            create_log(
+                db=db,
+                user_id=current_user_id,
+                log_type=0,
+                description=f"Enhanced system prompt for agent '{agent.name}' using Gemini."
+            )
+        except Exception as e:
+            logger.error(f"Failed to enhance system prompt: {str(e)}")
+            create_log(
+                db=db,
+                user_id=current_user_id,
+                log_type=2,
+                description=f"Failed to enhance system prompt for agent '{agent.name}': {str(e)}"
+            )
+            # Optionally, you can raise or fallback to original prompt
+            enhanced_prompt = agent.system_instruction
+
     # Create agent in database
     db_agent = Agent(
         name=agent.name,
-        system_instruction=agent.system_instruction,
+        system_instruction=enhanced_prompt,
         agent_type=agent.agent_type,
         config=agent.config,
         input_type=agent.input_type,
@@ -128,11 +174,9 @@ async def create_agent_endpoint(
         log_type=0,  # 0: info
         description=f"Created agent '{agent.name}'"
     )
-    
     db.add(db_agent)
     db.commit()
     db.refresh(db_agent)
-    
     return db_agent
 
 @router.get("/", response_model=List[AgentInDB])
