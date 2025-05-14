@@ -1,3 +1,4 @@
+import datetime
 import google.generativeai as genai
 from typing import Dict, Any
 from .base import BaseAgent
@@ -21,8 +22,18 @@ class GeminiAgent(BaseAgent):
         try:
             logger.debug(f"GeminiAgent processing input: {input_text} with context: {context}")
             
-            # Use system instruction from the agent
-            system_prompt = self.system_instruction
+
+            # Use system instruction from the agent and include today's date
+            today_str = datetime.datetime.now().strftime("%B %d, %Y")
+            date_info = f"If applicable, today's date is: {today_str}."
+            
+            if self.system_instruction:
+                system_prompt = f"{self.system_instruction}\n\n{date_info}"
+            else:
+                system_prompt = date_info
+
+
+
             logger.debug(f"Using system prompt: {system_prompt}")
             
             # Prepare generation config

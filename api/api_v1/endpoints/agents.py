@@ -28,7 +28,8 @@ async def get_agent_types():
         "edge_tts",
         "bark_tts",
         "transcribe",
-        "gemini_text2image"
+        "gemini_text2image",
+        "internet_research"  
     ]
     return agent_types
 
