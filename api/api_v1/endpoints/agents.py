@@ -111,7 +111,7 @@ async def create_agent_endpoint(
             )
         decrypted_key = decrypt_api_key(api_key.api_key)
         agent.config["api_key"] = decrypted_key
-
+    is_enhanced = False
     # --- ENHANCE SYSTEM PROMPT FEATURE ---
     enhanced_prompt = agent.system_instruction
     if enhance_prompt:
@@ -145,6 +145,7 @@ async def create_agent_endpoint(
         try:
             response = model.generate_content(enhancement_request)
             enhanced_prompt = response.text.strip() if hasattr(response, "text") else str(response)
+            is_enhanced = True
             # Log enhancement
             create_log(
                 db=db,
@@ -171,7 +172,8 @@ async def create_agent_endpoint(
         config=agent.config,
         input_type=agent.input_type,
         output_type=agent.output_type,
-        owner_id=current_user_id
+        owner_id=current_user_id,
+        is_enhanced=is_enhanced
     )
     create_log(
         db=db,

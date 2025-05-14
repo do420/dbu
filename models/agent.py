@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, JSON, DateTime
+from sqlalchemy import Boolean, Column, Integer, String, ForeignKey, JSON, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from db.base_class import Base
@@ -14,6 +14,6 @@ class Agent(Base):
     output_type = Column(String, nullable=False)  # "text", "image", "sound"
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    
+    is_enhanced = Column(Boolean, default=False)
     # Relationship
     owner = relationship("User", back_populates="agents")

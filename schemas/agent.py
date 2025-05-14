@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 class AgentBase(BaseModel):
@@ -17,6 +17,6 @@ class AgentInDB(AgentBase):
     id: int
     owner_id: int
     created_at: datetime
-
+    is_enhanced: Optional[bool] = Field(default=False)  # Optional boolean, default False
     class Config:
         orm_mode = True
