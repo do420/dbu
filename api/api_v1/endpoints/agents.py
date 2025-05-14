@@ -1270,3 +1270,98 @@ async def enhance_system_prompt(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to enhance system prompt: {str(e)}"
         )
+
+
+@router.get("/{agent_id}/documents")
+async def get_agent_documents(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Get list of documents uploaded to a RAG agent."""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    # Verify agent exists and belongs to user
+    db_agent = db.query(Agent).filter(
+        Agent.id == agent_id,
+        Agent.owner_id == current_user_id
+    ).first()
+    
+    if not db_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent with ID {agent_id} not found"
+        )
+    
+    if db_agent.agent_type.lower() != "rag":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent with ID {agent_id} is not a RAG agent"
+        )
+    
+    try:
+        # Check ChromaDB collection directory
+        chroma_dir = os.path.join("db", "chroma", f"rag_collection_{db_agent.name}")
+        if not os.path.exists(chroma_dir):
+            # Try fallback to id-based dir for backward compatibility
+            chroma_dir = os.path.join("db", "chroma", f"rag_collection_{agent_id}")
+        
+        if not os.path.exists(chroma_dir):
+            return {"documents": []}
+        
+        # Load ChromaDB collection and get documents
+        from langchain_community.vectorstores import Chroma
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        
+        # Get user's Gemini API key for embeddings
+        gemini_api_key_obj = db.query(APIKey).filter(
+            APIKey.user_id == current_user_id,
+            APIKey.provider == "gemini"
+        ).first()
+        
+        if not gemini_api_key_obj:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Gemini API key required to access documents"
+            )
+        
+        gemini_api_key = decrypt_api_key(gemini_api_key_obj.api_key)
+        
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+            google_api_key=gemini_api_key
+        )
+        
+        chroma_db = Chroma(
+            embedding_function=embeddings,
+            persist_directory=chroma_dir
+        )
+        
+        # Get all documents from the collection
+        # Perform a dummy search to get document metadata
+        all_docs = chroma_db.similarity_search("dummy", k=1000)  # Get many documents
+        
+        # Extract unique document sources/filenames
+        documents = {}
+        for doc in all_docs:
+            source = doc.metadata.get("source", "Unknown")
+            if source not in documents:
+                documents[source] = {
+                    "filename": os.path.basename(source) if source != "Unknown" else "Unknown",
+                    "source": source,
+                    "chunks": 0
+                }
+            documents[source]["chunks"] += 1
+        
+        return {"documents": list(documents.values())}
+        
+    except Exception as e:
+        logger.error(f"Error getting documents for agent {agent_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving documents: {str(e)}"
+        )
