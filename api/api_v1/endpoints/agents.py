@@ -1,6 +1,6 @@
 import os
 from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from agents.transribe_agent import TranscribeAgent
 from core.log_utils import create_log
@@ -13,6 +13,7 @@ from agents import create_agent
 from core.security import decrypt_api_key
 import logging
 from fastapi.responses import FileResponse
+import shutil
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -642,17 +643,19 @@ async def list_transcribe_languages():
 @router.post("/{agent_id}/transcribe", response_model=Dict[str, Any])
 async def transcribe_media(
     agent_id: int,
-    input_data: Dict[str, Any],
     db: Session = Depends(get_db),
-    current_user_id: int = 1  # Replace with actual user ID from authentication
+    current_user_id: int = 1,  # Replace with actual user ID from authentication
+    file: UploadFile = File(...),
+    language: str = Form("en"),
+    include_timestamps: bool = Form(False)
 ):
     """
-    Transcribe a media file from the media directory
+    Transcribe an uploaded media file
     
-    Input data should include:
-    - filename: name of the file in the media directory
-    - language: language code (optional, defaults to 'en')
-    - include_timestamps: whether to include timestamps in the output (optional)
+    Parameters:
+    - file: The audio/video file to transcribe
+    - language: Language code (optional, defaults to 'en')
+    - include_timestamps: Whether to include timestamps in the output (optional)
     """
     # Get the agent
     db_agent = db.query(Agent).filter(
@@ -672,29 +675,6 @@ async def transcribe_media(
             detail=f"Agent with ID {agent_id} is not a transcription agent"
         )
     
-    # Get filename and validate
-    filename = input_data.get("filename")
-    if not filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename is required in the input data"
-        )
-    
-    # Build the media file path
-    input_dir = "_INPUT"
-    file_path = os.path.join(input_dir, filename)
-    
-    # Check if the file exists
-    if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found in _INPUT directory: {filename}"
-        )
-    
-    # Get language from input data or use default
-    language = input_data.get("language", "en")
-    include_timestamps = input_data.get("include_timestamps", False)
-    
     # Create a process record for this operation
     process = Process(
         user_id=current_user_id,
@@ -704,6 +684,28 @@ async def transcribe_media(
     db.add(process)
     db.commit()
     db.refresh(process)
+    
+    # Save the uploaded file to _INPUT directory
+    filename = f"upload_{process.id}_{file.filename}"
+    input_dir = "_INPUT"
+    os.makedirs(input_dir, exist_ok=True)
+    file_path = os.path.join(input_dir, filename)
+    
+    try:
+        # Save uploaded file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        db.delete(process)
+        db.commit()
+        logger.error(f"Error saving uploaded file: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error saving uploaded file: {str(e)}"
+        )
+    finally:
+        # Reset file position
+        await file.seek(0)
     
     # Update agent config with additional parameters if provided
     config = db_agent.config.copy()
@@ -718,9 +720,13 @@ async def transcribe_media(
             db_agent.system_instruction
         )
     except Exception as e:
-        # Clean up the process record
+        # Clean up the process record and file
         db.delete(process)
         db.commit()
+        try:
+            os.remove(file_path)
+        except:
+            pass
         
         logger.error(f"Failed to initialize transcription agent {agent_id}: {str(e)}")
         raise HTTPException(
@@ -756,17 +762,26 @@ async def transcribe_media(
         result["process_id"] = process.id
         
         # Add the original filename to the result
-        result["original_filename"] = filename
+        result["original_filename"] = file.filename
         
         db.commit()
         
         return result
     except HTTPException:
+        # Clean up the file
+        try:
+            os.remove(file_path)
+        except:
+            pass
         raise
     except Exception as e:
-        # Clean up the process record
+        # Clean up the process record and file
         db.delete(process)
         db.commit()
+        try:
+            os.remove(file_path)
+        except:
+            pass
         
         logger.error(f"Error during transcription: {str(e)}")
         raise HTTPException(

@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 import whisperx
 from .base import BaseAgent
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,17 @@ class TranscribeAgent(BaseAgent):
         
         # Set transcription parameters
         self.model_name = self.config.get("model_name", "small")
-        self.device = self.config.get("device", "cuda")  # 'cuda' or 'cpu'
-        self.compute_type = self.config.get("compute_type", "float16")  # 'float16', 'float32', 'int8'
         
+        # Auto-detect if CUDA is available, otherwise use CPU
+        if torch.cuda.is_available() and self.config.get("use_gpu", True):
+            self.device = "cuda"
+            self.compute_type = self.config.get("compute_type", "float16")  # 'float16', 'float32', 'int8'
+            logger.info("CUDA is available, using GPU for transcription")
+        else:
+            self.device = "cpu"
+            self.compute_type = "int8"  # Use int8 for better CPU performance
+            logger.info("CUDA is not available, using CPU for transcription")
+            
         # Whether to align text or not
         self.align_text = self.config.get("align_text", False)
         self.align_model = self.config.get("align_model", "WAV2VEC2_ASR_LARGE_LV60K_960H")
@@ -35,7 +44,7 @@ class TranscribeAgent(BaseAgent):
         # Whether to include timestamps in output
         self.include_timestamps = self.config.get("include_timestamps", False)
         
-    async def process(self, input_data: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def process(self, input_data: Any, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Transcribe audio file and return the transcription
         
@@ -52,19 +61,24 @@ class TranscribeAgent(BaseAgent):
         
         # Get audio file path and language
         if isinstance(input_data, dict):
-            file_path = input_data.get("file_name")
+            file_path = input_data.get("file_path")
             language = input_data.get("language", "en")
         else:
             # If input is a string, assume it's the file path
             file_path = input_data
             language = context.get("language", "en")
         
-        #file path is not output + file_path
-        #file_path = os.path.join("_INPUT", file_path)
+        if not file_path:
+            return {
+                "error": "No file path provided",
+                "output": "Error: No file path provided"
+            }
+            
+        # Check if the file exists at the provided path
         if not os.path.exists(file_path):
-            # Eğer direkt dosya yolu değilse, _INPUT veya _OUTPUT altında ara
-            input_path = os.path.join("_INPUT", file_path)
-            output_path = os.path.join("_OUTPUT", file_path)
+            # Try alternative paths
+            input_path = os.path.join("_INPUT", os.path.basename(file_path))
+            output_path = os.path.join("_OUTPUT", os.path.basename(file_path))
             
             if os.path.exists(input_path):
                 file_path = input_path
@@ -72,35 +86,33 @@ class TranscribeAgent(BaseAgent):
                 file_path = output_path
         
         # If file is .mp4, extract audio to a temporary .wav file
-        if file_path.lower().endswith(".mp4"):
+        if file_path and file_path.lower().endswith(".mp4"):
             audio_path = file_path.rsplit(".", 1)[0] + ".wav"
             if not os.path.exists(audio_path):
                 try:
                     # Use ffmpeg to extract audio
+                    import subprocess
                     subprocess.run([
                         "ffmpeg", "-y", "-i", file_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path
                     ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"Failed to extract audio from video: {e.stderr.decode()}")
+                except Exception as e:
+                    logger.error(f"Failed to extract audio from video: {str(e)}")
                     return {
-                        "error": f"Failed to extract audio from video: {e.stderr.decode()}",
+                        "error": f"Failed to extract audio from video: {str(e)}",
                         "output": f"Error: Failed to extract audio from video"
                     }
             file_path = audio_path
 
-        
-
         if not file_path or not os.path.exists(file_path):
-            # Mevcut yol ve alternatif yolları kaydet
-            possible_input = os.path.join("_INPUT", os.path.basename(file_path))
-            possible_output = os.path.join("_OUTPUT", os.path.basename(file_path))
+            # Log all possible paths we tried
+            possible_input = os.path.join("_INPUT", os.path.basename(str(file_path)))
+            possible_output = os.path.join("_OUTPUT", os.path.basename(str(file_path)))
             
             logger.error(f"File not found at: {file_path}")
             logger.error(f"Also checked: {possible_input} - Exists: {os.path.exists(possible_input)}")
             logger.error(f"Also checked: {possible_output} - Exists: {os.path.exists(possible_output)}")
             return {
                 "error": f"Input audio file not found: {file_path}",
-                #"output": f"Error: Input audio file not found"
                 "output": f"Error: Input audio file not found. Checked paths: {file_path}, {possible_input}, {possible_output}"
             }
         
