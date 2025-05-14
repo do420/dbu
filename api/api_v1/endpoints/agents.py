@@ -29,7 +29,8 @@ async def get_agent_types():
         "bark_tts",
         "transcribe",
         "gemini_text2image",
-        "internet_research"  
+        "internet_research",
+        "document_parser"  
     ]
     return agent_types
 
