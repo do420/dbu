@@ -1164,12 +1164,6 @@ async def run_rag_agent_with_document(
             "total_tokens": len(prompt.split()) + len(response.text.split())
         }
         db.commit()
-        create_log(
-            db=db,
-            user_id=current_user_id,
-            log_type=3,
-            description=f"Successfully processed RAG query with agent '{db_agent.name}'"
-        )
         return result
     except Exception as e:
         logger.error(f"Error processing RAG query: {str(e)}")
