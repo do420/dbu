@@ -18,19 +18,52 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/types", response_model=List[str])
+
+
+@router.get("/types", response_model=List[Dict[str, str]])
 async def get_agent_types():
-    """Get a list of available agent types"""
-    # Define the available agent types
+    """Get a list of available agent types with their input and output types"""
     agent_types = [
-        "gemini",
-        "openai",
-        "edge_tts",
-        "bark_tts",
-        "transcribe",
-        "gemini_text2image",
-        "internet_research",
-        "document_parser"  
+        {
+            "type": "gemini",
+            "input_type": "text",
+            "output_type": "text"
+        },
+        {
+            "type": "openai",
+            "input_type": "text",
+            "output_type": "text"
+        },
+        {
+            "type": "edge_tts",
+            "input_type": "text",
+            "output_type": "sound"
+        },
+        {
+            "type": "bark_tts",
+            "input_type": "text",
+            "output_type": "sound"
+        },
+        {
+            "type": "transcribe",
+            "input_type": "sound",
+            "output_type": "text"
+        },
+        {
+            "type": "gemini_text2image",
+            "input_type": "text",
+            "output_type": "image"
+        },
+        {
+            "type": "internet_research",
+            "input_type": "text",
+            "output_type": "text"
+        },
+        {
+            "type": "document_parser",
+            "input_type": "document",
+            "output_type": "text"
+        }
     ]
     return agent_types
 
@@ -39,7 +72,7 @@ async def get_agent_types():
 async def create_agent_endpoint(
     agent: AgentCreate, 
     db: Session = Depends(get_db),
-    current_user_id: int = None # Replace with actual user ID from authentication
+    current_user_id: int = None 
 ):
     """Create a new agent"""
     if current_user_id is None:
