@@ -18,7 +18,7 @@ class MiniServiceInDB(MiniServiceBase):
     created_at: datetime
     average_token_usage: Dict[str, Any]
     run_time: int
-    is_enhanced: bool = Field(default=False)  # Default değeriyle ekledik
+    is_enhanced: Optional[bool] = False  # Changed to Optional with default=False
 
     class Config:
         orm_mode = True
