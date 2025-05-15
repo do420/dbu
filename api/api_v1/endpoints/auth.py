@@ -110,3 +110,68 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)) -> Any:
             "email": db_user.email
         }
     }
+
+
+from pydantic import BaseModel
+from fastapi import HTTPException, status
+
+# Schema for password change
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str 
+    confirm_password: str
+
+@router.post("/change-password")
+async def change_password(
+    password_data: PasswordChange,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """
+    Change user password
+    
+    Required fields:
+    - Current password
+    - New password
+    - Confirm new password
+    """
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User ID is required"
+        )
+    
+    # Check if new password matches confirmation
+    if password_data.new_password != password_data.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password and confirmation password do not match"
+        )
+    
+    # Find user in database
+    user = db.query(User).filter(User.id == current_user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Verify current password
+    if not verify_password(password_data.current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+    
+    # Check that new password is different from current one
+    if verify_password(password_data.new_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from current password"
+        )
+    
+    # Hash new password and save
+    user.hashed_password = hash_password(password_data.new_password)
+    db.commit()
+    
+    return {"message": "Your password has been successfully changed"}
