@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, JSON, DateTime
+from sqlalchemy import Boolean, Column, Integer, String, ForeignKey, JSON, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from db.base_class import Base
@@ -15,6 +15,7 @@ class MiniService(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     average_token_usage = Column(JSON, default={}, nullable=False)
     run_time = Column(Integer, default=0, nullable=False)
+    is_enhanced = Column(Boolean, default=False)
     
     # Relationships
     owner = relationship("User", back_populates="mini_services")

@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 class MiniServiceBase(BaseModel):
@@ -18,6 +18,7 @@ class MiniServiceInDB(MiniServiceBase):
     created_at: datetime
     average_token_usage: Dict[str, Any]
     run_time: int
+    is_enhanced: bool = Field(default=False)  # Default değeriyle ekledik
 
     class Config:
         orm_mode = True

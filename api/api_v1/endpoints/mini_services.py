@@ -76,6 +76,8 @@ async def create_mini_service(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Node {node_id} has invalid 'next' value. Must be an integer node ID or null."
                 )
+            
+    is_enhanced = False
      # Check that the agent exists and belongs to the current user
      # Check that all referenced agent IDs exist
     for agent_id in agent_ids:
@@ -90,6 +92,12 @@ async def create_mini_service(
                 #detail=f"Agent with ID {agent_id} not found or you don't have permission to use it"
                 detail=f"Agent with ID {agent_id} not found"
             )
+        
+        # Check if this agent has enhanced prompt
+        if agent.is_enhanced:
+            is_enhanced = True
+           
+    
     
     # Restructure the workflow to ensure node IDs are stored as strings
     # (This is for compatibility with JSON serialization in the database)
@@ -113,14 +121,16 @@ async def create_mini_service(
         output_type=mini_service.output_type,
         owner_id=current_user_id,
         average_token_usage={},
-        run_time=0
+        run_time=0,
+        is_enhanced=is_enhanced  
     )
 
     create_log(
         db=db,
         user_id=current_user_id,
         log_type=0,  # 0: info
-        description=f"Created a new mini-service: '{mini_service.name}'"
+        description=f"Created a new mini-service: '{mini_service.name}'" + 
+                    (f" (with enhanced prompts)" if is_enhanced else "")
     )
 
     
@@ -290,9 +300,7 @@ async def list_mini_services(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="current_user_id parameter is required"
         )
-    mini_services = db.query(MiniService).filter(
-        MiniService.owner_id == current_user_id
-    ).offset(skip).limit(limit).all()
+    mini_services = db.query(MiniService).offset(skip).limit(limit).all()
     
     return mini_services
 
