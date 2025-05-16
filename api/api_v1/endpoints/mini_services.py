@@ -122,14 +122,16 @@ async def create_mini_service(
         owner_id=current_user_id,
         average_token_usage={},
         run_time=0,
-        is_enhanced=is_enhanced  
+        is_enhanced=is_enhanced,
+        is_public= mini_service.is_public or False,  # Default to private if not specified
     )
 
+    visibility_status = "public" if mini_service.is_public else "private"
     create_log(
         db=db,
         user_id=current_user_id,
         log_type=0,  # 0: info
-        description=f"Created a new mini-service: '{mini_service.name}'" + 
+        description=f"Created a new {visibility_status} mini-service: '{mini_service.name}'" + 
                     (f" (with enhanced prompts)" if is_enhanced else "")
     )
 
@@ -163,6 +165,13 @@ async def run_mini_service(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mini service with ID {service_id} not found"
         )
+    
+    if mini_service.is_public is not True and mini_service.owner_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to run this mini service"
+        )
+    
     
     # Extract input
     input_value = input_data.get("input")
@@ -300,7 +309,15 @@ async def list_mini_services(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="current_user_id parameter is required"
         )
-    mini_services = db.query(MiniService).offset(skip).limit(limit).all()
+    
+    # Fetch mini services that are public or owned by the current user
+    mini_services = db.query(MiniService).filter(
+        (MiniService.is_public == True) | 
+        (MiniService.owner_id == current_user_id)
+    ).offset(skip).limit(limit).all()
+    
+
+
     
     return mini_services
 
@@ -317,14 +334,19 @@ async def get_mini_service(
             detail="current_user_id parameter is required"
         )
     mini_service = db.query(MiniService).filter(
-        MiniService.id == service_id,
-        #MiniService.owner_id == current_user_id
+        MiniService.id == service_id
     ).first()
     
     if not mini_service:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mini service with ID {service_id} not found"
+        )
+    
+    if mini_service.is_public is not True and mini_service.owner_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this mini service"
         )
     
     return mini_service

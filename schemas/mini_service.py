@@ -8,6 +8,7 @@ class MiniServiceBase(BaseModel):
     workflow: Dict[str, Any]
     input_type: str
     output_type: str
+    is_public: Optional[bool] = False  # Default to private
 
 class MiniServiceCreate(MiniServiceBase):
     pass
@@ -19,6 +20,7 @@ class MiniServiceInDB(MiniServiceBase):
     average_token_usage: Dict[str, Any]
     run_time: int
     is_enhanced: Optional[bool] = False  # Changed to Optional with default=False
+    
 
     class Config:
         orm_mode = True
