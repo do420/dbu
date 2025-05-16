@@ -318,7 +318,7 @@ async def get_mini_service(
         )
     mini_service = db.query(MiniService).filter(
         MiniService.id == service_id,
-        MiniService.owner_id == current_user_id
+        #MiniService.owner_id == current_user_id
     ).first()
     
     if not mini_service:
