@@ -269,7 +269,7 @@ async def run_mini_service(
         create_log(
             db=db,
             user_id=current_user_id,
-            log_type=0,  # 0: info
+            log_type=5,  # 0: info
             description=f"Succesfully run a mini-service: '{mini_service.name}'"
         )
             
@@ -397,7 +397,7 @@ async def delete_mini_service(
         create_log(
             db=db,
             user_id=current_user_id,
-            log_type=0,
+            log_type=4,
             description=f"Deleted mini-service '{mini_service.name}'"
         )
         db.delete(mini_service)

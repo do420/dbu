@@ -150,7 +150,7 @@ async def create_agent_endpoint(
             create_log(
                 db=db,
                 user_id=current_user_id,
-                log_type=0,
+                log_type=2,
                 description=f"Enhanced system prompt for agent '{agent.name}' using Gemini."
             )
         except Exception as e:
@@ -178,7 +178,7 @@ async def create_agent_endpoint(
     create_log(
         db=db,
         user_id=current_user_id,
-        log_type=0,  # 0: info
+        log_type=1,  
         description=f"Created agent '{agent.name}'"
     )
     db.add(db_agent)
@@ -263,7 +263,7 @@ async def update_agent(
     create_log(
         db=db,
         user_id=current_user_id,
-        log_type=0,  # 0: info
+        log_type=1,  # 0: info
         description=f"Updated agent '{agent_update.name}'"
     )
     
@@ -310,7 +310,7 @@ async def delete_agent(
     create_log(
         db=db,
         user_id=current_user_id,
-        log_type=0,  # 0: info
+        log_type=3,  
         description=f"Deleted agent '{db_agent.name}'"
     )
 
