@@ -9,7 +9,7 @@ class APIKeyCreate(APIKeyBase):
 class APIKeyInDB(APIKeyBase):
     id: int
     user_id: int
-    # Not returning the actual API key for security
+    api_key: str
 
     class Config:
         orm_mode = True
