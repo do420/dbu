@@ -19,7 +19,6 @@ router = APIRouter()
 
 
 
-
 @router.get("/types", response_model=List[Dict[str, str]])
 async def get_agent_types():
     """Get a list of available agent types with their input and output types"""
@@ -27,47 +26,56 @@ async def get_agent_types():
         {
             "type": "gemini",
             "input_type": "text",
-            "output_type": "text"
+            "output_type": "text",
+            "api_key_required": "True"
         },
         {
             "type": "openai",
             "input_type": "text",
-            "output_type": "text"
+            "output_type": "text",
+            "api_key_required": "True"
         },
         {
             "type": "edge_tts",
             "input_type": "text",
-            "output_type": "sound"
+            "output_type": "sound",
+            "api_key_required": "False"
         },
         {
             "type": "bark_tts",
             "input_type": "text",
-            "output_type": "sound"
+            "output_type": "sound",
+             "api_key_required": "False"
         },
         {
             "type": "transcribe",
             "input_type": "sound",
-            "output_type": "text"
+            "output_type": "text",
+            "api_key_required": "False"
         },
         {
             "type": "gemini_text2image",
             "input_type": "text",
-            "output_type": "image"
+            "output_type": "image",
+            "api_key_required": "True"
         },
         {
             "type": "internet_research",
             "input_type": "text",
-            "output_type": "text"
+            "output_type": "text",
+            "api_key_required": "False"
         },
         {
             "type": "document_parser",
             "input_type": "document",
-            "output_type": "text"
+            "output_type": "text",
+            "api_key_required": "False"
         },
         {
             "type": "custom_endpoint_llm",
             "input_type": "text",
-            "output_type": "text" 
+            "output_type": "text",
+            "api_key_required": "True"
         },
     ]
     return agent_types
@@ -98,19 +106,7 @@ async def create_agent_endpoint(
             detail=f"Invalid output_type. Must be one of: {valid_types}"
         )
 
-    # If agent uses an API key, verify it exists
-    if agent.agent_type in ["gemini", "openai"] and "api_key" not in agent.config:
-        api_key = db.query(APIKey).filter(
-            APIKey.user_id == current_user_id,
-            APIKey.provider == agent.agent_type
-        ).first()
-        if not api_key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No API key found for {agent.agent_type}. Please add an API key first."
-            )
-        decrypted_key = decrypt_api_key(api_key.api_key)
-        agent.config["api_key"] = decrypted_key
+    
     is_enhanced = False
     # --- ENHANCE SYSTEM PROMPT FEATURE ---
     enhanced_prompt = agent.system_instruction
@@ -357,15 +353,7 @@ async def run_agent(
     try:
         # If agent uses API key but it's not in config, get from API keys
         config = db_agent.config.copy()
-        if db_agent.agent_type in ["gemini", "openai"] and "api_key" not in config:
-            api_key = db.query(APIKey).filter(
-                APIKey.user_id == current_user_id,
-                APIKey.provider == db_agent.agent_type
-            ).first()
-            
-            if api_key:
-                decrypted_key = decrypt_api_key(api_key.api_key)
-                config["api_key"] = decrypted_key
+        
         
         agent_instance = create_agent(
             db_agent.agent_type, 
