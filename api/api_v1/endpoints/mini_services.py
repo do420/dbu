@@ -149,7 +149,13 @@ async def run_mini_service(
     db: Session = Depends(get_db),
     current_user_id: int = None  # Replace with actual user ID from authentication
 ):
-    """Run a mini service with the given input"""
+    """Run a mini service with the given input
+    
+    Input data should include:
+    - input: The input for the mini service
+    - context: Optional context data
+    - api_keys: Dictionary mapping agent IDs to API keys (e.g. {"0": "sk-...", "1": "..."})
+    """
     if current_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -173,8 +179,10 @@ async def run_mini_service(
         )
     
     
-    # Extract input
+    # Extract input and API keys
     input_value = input_data.get("input")
+    api_keys = input_data.get("api_keys", {})
+
     if input_value is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -194,16 +202,22 @@ async def run_mini_service(
     
     # Get all agents used in this mini service's workflow
     agent_ids = set()
+ 
+
+    
     for node_id, node in mini_service.workflow.get("nodes", {}).items():
         agent_id = node.get("agent_id")
         if agent_id:
             agent_ids.add(int(agent_id))
+
     
     # Load agent instances
     agents = {}
     for agent_id in agent_ids:
         agent_record = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent_record:
+            db.delete(process)
+            db.commit()
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent with ID {agent_id} not found"
@@ -211,9 +225,21 @@ async def run_mini_service(
         
         # Create agent instance
         try:
+
+            # Start with the agent's base configuration
+            config = agent_record.config.copy() if agent_record.config else {}
+            
+            # Check if this agent requires an API key and one was provided
+            agent_str_id = str(agent_id)
+            print(f"Agent ID: {agent_str_id}, API Keys: {api_keys}")
+            if agent_str_id in api_keys and api_keys[agent_str_id]:
+                print(f"Using API key for agent {agent_str_id}: {api_keys[agent_str_id]}")
+                # Use the API key provided for this specific agent
+                config["api_key"] = api_keys[agent_str_id]
+
             agent_instance = create_agent(
                 agent_record.agent_type, 
-                agent_record.config, 
+                config,
                 agent_record.system_instruction
             )
             agents[str(agent_id)] = agent_instance
