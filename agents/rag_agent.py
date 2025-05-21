@@ -90,7 +90,7 @@ class RAGAgent(BaseAgent):
         self.api_key = config.get('api_key')
         if not self.api_key:
             raise ValueError("API key is required for RAGAgent")
-        self.model_name = config.get('model', 'gemini-1.5-pro')
+        self.model_name = config.get('model', 'gemini-1.5-flash')
         self.temperature = float(config.get('temperature', 0.7))
         self.max_tokens = int(config.get('max_tokens', 1024))
         self.top_p = float(config.get('top_p', 0.95))

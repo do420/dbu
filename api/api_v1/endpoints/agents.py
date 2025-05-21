@@ -1,6 +1,6 @@
 import os
 from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
 from agents.transribe_agent import TranscribeAgent
 from core.log_utils import create_log
@@ -14,6 +14,7 @@ from core.security import decrypt_api_key
 import logging
 from fastapi.responses import FileResponse
 import shutil
+import base64
 #test
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1009,111 +1010,191 @@ async def translate_text(
 async def run_rag_agent_with_document(
     agent_id: int,
     query: str = Form(...),
-    document: UploadFile = File(...),
+    api_keys: str = Form(...),  # JSON string
+    file: UploadFile = File(...),
+    filename: str = Form(...),
     db: Session = Depends(get_db),
     current_user_id: int = None
 ):
-    """Run a RAG agent with a query and uploaded document
+    """Run a RAG agent with a query and uploaded document, using Gemini API key from the form body (multipart/form-data)."""
+    import json
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    # Parse api_keys JSON
+    try:
+        api_keys_dict = json.loads(api_keys)
+        gemini_api_key = api_keys_dict.get("gemini")
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid api_keys JSON: {str(e)}"
+        )
+    if not query or not gemini_api_key or not file or not filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'query', 'api_keys[\'gemini\']', 'file', and 'filename' are required in the form body."
+        )
+    # Get the agent
+    db_agent = db.query(Agent).filter(
+        Agent.id == agent_id
+    ).first()
+    if not db_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent with ID {agent_id} not found"
+        )
+    if db_agent.agent_type.lower() != "rag":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent with ID {agent_id} is not a RAG agent"
+        )
+    if not filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF documents are supported"
+        )
+    try:
+        document_content = await file.read()
+        # Create process record
+        process = Process(
+            mini_service_id=None,  # Not associated with a mini service
+            user_id=current_user_id,
+            total_tokens={}
+        )
+        db.add(process)
+        db.commit()
+        db.refresh(process)
+        # Create agent instance with API key from request
+        config = db_agent.config.copy() if db_agent.config else {}
+        config["api_key"] = gemini_api_key
+        agent_instance = create_agent(
+            db_agent.agent_type,
+            config,
+            db_agent.system_instruction
+        )
+        # Process the document and query
+        context = {
+            "document_content": document_content,
+            "filename": filename,
+            "process_id": process.id
+        }
+        result = await agent_instance.process(query, context)
+        # Update the process record with token usage
+        if "token_usage" in result:
+            process.total_tokens = result["token_usage"]
+            db.commit()
+        create_log(
+            db=db,
+            user_id=current_user_id,
+            log_type=3,  # Custom log type for RAG
+            description=f"Successfully processed document '{filename}' with RAG agent '{db_agent.name}'"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error processing document with RAG agent: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing document: {str(e)}"
+        )
+
+@router.post("/enhance_system_prompt", response_model=Dict[str, str])
+async def enhance_system_prompt(
+    agent_details: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """
+    Enhance a system prompt based on provided agent details.
     
-    Args:
-        agent_id: ID of the RAG agent to use
-        query: User query to answer from the document
-        document: PDF document to process
+    Parameters:
+    - agent_details: Dictionary containing:
+        - name: The agent name
+        - system_instruction: Current system instruction (if any)
+        - agent_type: Type of agent (gemini, openai, etc.)
+        - input_type: Type of input (text, document, etc.)
+        - output_type: Type of output (text, image, etc.)
+        - description: General description of the agent (optional)
+    
+    Returns:
+    - Dictionary with enhanced_prompt
     """
     if current_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="current_user_id parameter is required"
         )
+        
+    # Validate required fields
+    required_fields = ["name", "agent_type", "input_type", "output_type"]
+    for field in required_fields:
+        if field not in agent_details:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required field: {field}"
+            )
     
-    # Get the agent
-    db_agent = db.query(Agent).filter(
-        Agent.id == agent_id
-    ).first()
-    
-    if not db_agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent with ID {agent_id} not found"
-        )
-    
-    if db_agent.agent_type.lower() != "rag":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Agent with ID {agent_id} is not a RAG agent"
-        )
-    
-    # Get API key for Gemini
-    api_key_obj = db.query(APIKey).filter(
+    # Get user's Gemini API key
+    gemini_api_key_obj = db.query(APIKey).filter(
         APIKey.user_id == current_user_id,
         APIKey.provider == "gemini"
     ).first()
     
-    if not api_key_obj:
+    if not gemini_api_key_obj:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Gemini API key is required for RAG agent"
+            detail="No Gemini API key found for prompt enhancement."
         )
     
-    api_key = decrypt_api_key(api_key_obj.api_key)
+    gemini_api_key = decrypt_api_key(gemini_api_key_obj.api_key)
     
-    # Validate file type
-    if not document.filename.lower().endswith('.pdf'):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF documents are supported"
-        )
+    # Get original system instruction or use empty string
+    original_instruction = agent_details.get("system_instruction", "")
+    description = agent_details.get("description", "")
     
+    # Prepare enhancement prompt
+    enhancement_request = (
+        f"You are an expert prompt engineer. "
+        f"Given the following agent details, enhance and improve the system prompt for optimal performance. "
+        f"Agent Name: {agent_details['name']}\n"
+        f"Description: {description}\n"
+        f"Type: {agent_details['agent_type']}\n"
+        f"Input Type: {agent_details['input_type']}\n"
+        f"Output Type: {agent_details['output_type']}\n"
+        f"Original System Prompt: {original_instruction}\n\n"
+        f"Return ONLY the improved system prompt."
+    )
+    
+    # Use Gemini to enhance the prompt
     try:
-        # Read document content
-        document_content = await document.read()
+        import google.generativeai as genai
+        genai.configure(api_key=gemini_api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
         
-        # Create process record
-        process = Process(
-            mini_service_id=None,  # Not associated with a mini service
-            user_id=current_user_id,
-            total_tokens={}  # Will update after processing
-        )
-        db.add(process)
-        db.commit()
-        db.refresh(process)
+        response = model.generate_content(enhancement_request)
+        enhanced_prompt = response.text.strip() if hasattr(response, "text") else str(response)
         
-        # Create agent instance with API key
-        config = db_agent.config.copy() if db_agent.config else {}
-        config["api_key"] = api_key
-        
-        agent_instance = create_agent(
-            db_agent.agent_type,
-            config,
-            db_agent.system_instruction
-        )
-        
-        # Process the document and query
-        context = {
-            "document_content": document_content,
-            "filename": document.filename,
-            "process_id": process.id
-        }
-        
-        result = await agent_instance.process(query, context)
-        
-        # Update the process record with token usage
-        if "token_usage" in result:
-            process.total_tokens = result["token_usage"]
-            db.commit()
-        
+        # Log enhancement
         create_log(
             db=db,
             user_id=current_user_id,
-            log_type=3,  # Custom log type for RAG
-            description=f"Successfully processed document '{document.filename}' with RAG agent '{db_agent.name}'"
+            log_type=2,
+            description=f"Enhanced system prompt for agent '{agent_details['name']}' using Gemini."
         )
         
-        return result
-        
+        return {"enhanced_prompt": enhanced_prompt}
     except Exception as e:
-        logger.error(f"Error processing document with RAG agent: {str(e)}")
+        logger.error(f"Failed to enhance system prompt: {str(e)}")
+        create_log(
+            db=db,
+            user_id=current_user_id,
+            log_type=2,
+            description=f"Failed to enhance system prompt for agent '{agent_details['name']}': {str(e)}"
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing document: {str(e)}"
+            detail=f"Failed to enhance system prompt: {str(e)}"
         )
