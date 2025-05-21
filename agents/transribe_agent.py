@@ -60,7 +60,16 @@ class TranscribeAgent(BaseAgent):
             language = context.get("language", "en")
         
         #file path is not output + file_path
-        file_path = os.path.join("_INPUT", file_path)
+        #file_path = os.path.join("_INPUT", file_path)
+        if not os.path.exists(file_path):
+            # Eğer direkt dosya yolu değilse, _INPUT veya _OUTPUT altında ara
+            input_path = os.path.join("_INPUT", file_path)
+            output_path = os.path.join("_OUTPUT", file_path)
+            
+            if os.path.exists(input_path):
+                file_path = input_path
+            elif os.path.exists(output_path):
+                file_path = output_path
         
         # If file is .mp4, extract audio to a temporary .wav file
         if file_path.lower().endswith(".mp4"):
@@ -82,9 +91,17 @@ class TranscribeAgent(BaseAgent):
         
 
         if not file_path or not os.path.exists(file_path):
+            # Mevcut yol ve alternatif yolları kaydet
+            possible_input = os.path.join("_INPUT", os.path.basename(file_path))
+            possible_output = os.path.join("_OUTPUT", os.path.basename(file_path))
+            
+            logger.error(f"File not found at: {file_path}")
+            logger.error(f"Also checked: {possible_input} - Exists: {os.path.exists(possible_input)}")
+            logger.error(f"Also checked: {possible_output} - Exists: {os.path.exists(possible_output)}")
             return {
                 "error": f"Input audio file not found: {file_path}",
-                "output": f"Error: Input audio file not found"
+                #"output": f"Error: Input audio file not found"
+                "output": f"Error: Input audio file not found. Checked paths: {file_path}, {possible_input}, {possible_output}"
             }
         
         # Generate output filenames based on process_id if available
