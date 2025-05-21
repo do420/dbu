@@ -360,13 +360,15 @@ async def run_agent(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Input text is required"
         )
-    
     # Create agent instance
     try:
-        # If agent uses API key but it's not in config, get from API keys
         config = db_agent.config.copy()
-        
-        
+        # For RAG agents, instruct to use /run/rag_document instead
+        if db_agent.agent_type.lower() == "rag":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="For RAG agents, please use the /run/rag_document endpoint instead of /run."
+            )
         agent_instance = create_agent(
             db_agent.agent_type, 
             config, 
@@ -378,11 +380,23 @@ async def run_agent(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to initialize agent {agent_id}: {str(e)}"
         )
-    
     # Process with the agent
     try:
         context = input_data.get("context", {})
+        # For RAG, do NOT require or pass document_content/filename, just query
         result = await agent_instance.process(input_text, context)
+
+        # DEBUG: If this is a RAG agent, log and return extra info
+        if db_agent.agent_type.lower() == "rag":
+            # Try to include debug info from the agent if available
+            debug_info = result.copy()
+            # If the agent returns context or chunks, include them
+            if "debug_context" in result:
+                debug_info["debug_context"] = result["debug_context"]
+            # Log the result for inspection
+            logger.info(f"RAG DEBUG: Query='{input_text}' | Result={result}")
+            # Also return the debug info in the API response
+            return debug_info
         return result
     except Exception as e:
         logger.error(f"Error processing with agent: {str(e)}")

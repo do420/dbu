@@ -17,14 +17,15 @@ logger = logging.getLogger(__name__)
 class GeminiEmbeddingFunction:
     """Custom embedding function for Gemini API that follows ChromaDB interface"""
     
-    def __init__(self, api_key: str, model_name: str = "models/embedding-001"):
+    def __init__(self, api_key: str, model_name: str = "models/embedding-001", embedding_dim: int = 768):
         self.api_key = api_key
         self.model_name = model_name
+        self.embedding_dim = embedding_dim
         genai.configure(api_key=self.api_key)
         self.model = genai.GenerativeModel(model_name)
         
     def __call__(self, input: List[str]) -> List[List[float]]:
-        """Generate embeddings for a list of texts
+        """Generate embeddings for a list of texts (reduced dimension)
         
         Args:
             input: List of text strings to embed (parameter name must be 'input' for ChromaDB compatibility)
@@ -47,7 +48,7 @@ class GeminiEmbeddingFunction:
                 for text in batch:
                     if not text or not text.strip():
                         # Handle empty text with zero embedding
-                        batch_embeddings.append([0.0] * 768)  # Standard embedding dimension
+                        batch_embeddings.append([0.0] * self.embedding_dim)
                         continue
                     
                     # Generate embedding for the text
@@ -58,18 +59,19 @@ class GeminiEmbeddingFunction:
                             task_type="retrieval_document"
                         )
                         
-                        # Check for the expected response structure based on the Google Generative AI SDK
+                        # Use only the first embedding_dim elements
                         if hasattr(embedding_result, "embedding"):
-                            batch_embeddings.append(embedding_result.embedding)
+                            emb = embedding_result.embedding[:self.embedding_dim]
                         elif isinstance(embedding_result, dict) and "embedding" in embedding_result:
-                            batch_embeddings.append(embedding_result["embedding"])
+                            emb = embedding_result["embedding"][:self.embedding_dim]
                         else:
                             logger.warning(f"Unexpected embedding response format: {embedding_result}")
-                            batch_embeddings.append([0.0] * 768)
+                            emb = [0.0] * self.embedding_dim
+                        batch_embeddings.append(emb)
                     
                     except Exception as e:
                         logger.error(f"Error generating embedding: {str(e)}")
-                        batch_embeddings.append([0.0] * 768)  # Use zero embedding on error
+                        batch_embeddings.append([0.0] * self.embedding_dim)  # Use zero embedding on error
                 
                 embeddings.extend(batch_embeddings)
             
@@ -78,7 +80,7 @@ class GeminiEmbeddingFunction:
         except Exception as e:
             logger.error(f"Error in embedding function: {str(e)}")
             # Return zero embeddings on error
-            return [[0.0] * 768] * len(input)
+            return [[0.0] * self.embedding_dim] * len(input)
 
 class RAGAgent(BaseAgent):
     """Retrieval-Augmented Generation agent using ChromaDB and Gemini without LangChain"""
@@ -224,11 +226,30 @@ class RAGAgent(BaseAgent):
         return pages
     
     def _document_already_processed(self, filename: str) -> bool:
-        # Check if document is already in ChromaDB by filename
+        """Check if a document has already been processed and exists in ChromaDB
+        
+        This helps avoid re-processing documents that have already been loaded,
+        saving both time and memory.
+        
+        Args:
+            filename: The filename to check
+            
+        Returns:
+            True if the document already exists in the collection, False otherwise
+        """
         try:
-            results = self.collection.get(where={"filename": filename})
-            return bool(results and results.get("ids"))
-        except Exception:
+            # Query for documents with matching filename metadata
+            results = self.collection.get(
+                where={"filename": filename},
+                limit=1  # We only need to know if any exist
+            )
+            
+            # Check if we got any results back
+            return bool(results and results.get("ids") and len(results["ids"]) > 0)
+            
+        except Exception as e:
+            # Log the error but assume the document hasn't been processed
+            logger.error(f"Error checking if document exists: {str(e)}")
             return False
 
     async def process_document(self, document_content: bytes, filename: str) -> Dict[str, Any]:
@@ -238,47 +259,54 @@ class RAGAgent(BaseAgent):
         pdf_path = os.path.join(self.collection_path, filename)
         with open(pdf_path, 'wb') as f:
             f.write(document_content)
+            f.flush()
         try:
-            pdf_reader = PyPDF2.PdfReader(pdf_path)
             doc_id = str(uuid.uuid4())
-            batch_size = 10  # Tune this for your RAM
-            chunk_ids, document_chunks, chunk_metadata = [], [], []
             total_chunks = 0
-            for page_num, page in enumerate(pdf_reader.pages):
-                text = page.extract_text()
-                if not text or not text.strip():
-                    continue
-                for i, chunk in enumerate(self.split_text(text)):
-                    chunk_id = f"{doc_id}_{page_num+1}_{i}"
-                    chunk_ids.append(chunk_id)
-                    document_chunks.append(chunk)
-                    chunk_metadata.append({
-                        "document_id": doc_id,
-                        "filename": filename,
-                        "page": page_num+1,
-                        "chunk": i,
-                        "source": f"Page {page_num+1} of {filename}"
-                    })
-                    # Add in batches
-                    if len(chunk_ids) >= batch_size:
-                        self.collection.add(
-                            ids=chunk_ids,
-                            documents=document_chunks,
-                            metadatas=chunk_metadata
+            # Use a much smaller chunk size for less RAM
+            orig_chunk_size = self.chunk_size
+            self.chunk_size = min(256, orig_chunk_size)  # 256 chars per chunk
+            # Use get_or_create_collection and upsert as per ChromaDB docs
+            collection = self.chroma_client.get_or_create_collection(
+                name=self.collection_name,
+                embedding_function=self.embedding_function
+            )
+            with open(pdf_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                for page_num, page in enumerate(pdf_reader.pages):
+                    text = page.extract_text()
+                    if not text or not text.strip():
+                        continue
+                    for i, chunk in enumerate(self.split_text(text)):
+                        chunk_id = f"{doc_id}_{page_num+1}_{i}"
+                        # Use upsert for each chunk, no batching, minimal memory
+                        collection.upsert(
+                            documents=[chunk],
+                            ids=[chunk_id],
+                            metadatas=[{
+                                "document_id": doc_id,
+                                "filename": filename,
+                                "page": page_num+1,
+                                "chunk": i,
+                                "source": f"Page {page_num+1} of {filename}"
+                            }]
                         )
-                        total_chunks += len(chunk_ids)
-                        chunk_ids, document_chunks, chunk_metadata = [], [], []
-            # Add any remaining
-            if chunk_ids:
-                self.collection.add(
-                    ids=chunk_ids,
-                    documents=document_chunks,
-                    metadatas=chunk_metadata
-                )
-                total_chunks += len(chunk_ids)
+                        total_chunks += 1
+                        del chunk_id, chunk
+                    del text
+                del pdf_reader
+            self.chunk_size = orig_chunk_size  # Restore original chunk size
+            try:
+                os.remove(pdf_path)
+            except Exception as e:
+                logger.warning(f"Could not remove temp PDF file '{pdf_path}': {str(e)}")
             return {"status": "success", "document": {"filename": filename, "num_chunks": total_chunks}}
         except Exception as e:
             logger.error(f"Error processing document: {str(e)}")
+            try:
+                os.remove(pdf_path)
+            except:
+                pass
             return {"status": "error", "error": str(e)}
 
     async def process(self, input_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -288,72 +316,69 @@ class RAGAgent(BaseAgent):
             doc_result = await self.process_document(context["document_content"], context["filename"])
             if doc_result["status"] == "error":
                 return {"status": "error", "error": f"Failed to process document: {doc_result['error']}"}
+            # If this is just a document upload with empty query, return success
+            if not input_text:
+                return {
+                    "status": "success",
+                    "message": f"Document '{context['filename']}' processed successfully",
+                    "document": doc_result["document"]
+                }
         # Query ChromaDB
         try:
             query_results = self.collection.query(query_texts=[input_text], n_results=self.num_results)
+            # DEBUG: Log the raw ChromaDB query results
+            logger.info(f"RAGAgent ChromaDB query for: '{input_text}' => {query_results}")
             # Extract content from relevant documents
             if not query_results["documents"] or not query_results["documents"][0]:
                 context_text = "No relevant information found in the documents."
                 sources = []
+                debug_chunks = []
+                debug_metadatas = []
             else:
                 # Extract the text from the most relevant chunks
                 chunks = query_results["documents"][0]
                 metadatas = query_results["metadatas"][0]
-                
                 context_text = "\n\n".join([
-                    f"[Document: {meta.get('filename', 'Unknown')}, Page {meta.get('page', 'Unknown')}]\n{chunk}"
+                    f"[Document: {meta.get('filename', 'Unknown')}, Page {meta.get('page', 'Unknown')}]:\n{chunk}"
                     for chunk, meta in zip(chunks, metadatas)
                 ])
-                
                 # Prepare sources info for response
                 sources = []
                 for i, (chunk, meta) in enumerate(zip(chunks[:3], metadatas[:3])):  # Top 3 sources
                     source_info = {
                         "page": meta.get("page", "Unknown"),
-                        "source": meta.get("source", f"Page {meta.get('page', 'Unknown')} of {meta.get('filename', 'Unknown')}"),
+                        "source": meta.get("source", f"Page {meta.get('page', 'Unknown')} of {meta.get('filename', 'Unknown')}") ,
                         "excerpt": chunk[:100] + "..." if len(chunk) > 100 else chunk
                     }
                     sources.append(source_info)
-            
+                debug_chunks = chunks
+                debug_metadatas = metadatas
             # Build prompt with RAG context
-            rag_prompt = f"""You are an AI assistant with access to the following document information:
-
-{context_text}
-
-Based on the above context and your knowledge, please respond to this query:
-{input_text}
-
-Please be accurate, helpful, and only use information from the provided context when answering specific questions about the document content.
-If you don't know or the information isn't in the context, say so rather than making up an answer.
-
-{self.system_instruction}
-"""
-            
+            rag_prompt = f"""You are an AI assistant with access to the following document information:\n\n{context_text}\n\nBased on the above context and your knowledge, please respond to this query:\n{input_text}\n\nPlease be accurate, helpful, and only use information from the provided context when answering specific questions about the document content.\nIf you don't know or the information isn't in the context, say so rather than making up an answer.\n\n{self.system_instruction}\n"""
             # Generate response using Gemini
             response = self.model.generate_content(rag_prompt)
-            
             # Extract the response text
             response_text = response.text if hasattr(response, "text") else str(response)
-            
             # Calculate token usage (approximate since Gemini doesn't always return this)
             # Estimation: ~4 chars per token
             prompt_tokens = len(rag_prompt) // 4
             completion_tokens = len(response_text) // 4
             total_tokens = prompt_tokens + completion_tokens
-            
             token_usage = {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens
             }
+            # Return debug info for troubleshooting
             return {
                 "status": "success",
                 "response": response_text,
                 "token_usage": token_usage,
-                "sources": sources
-                # 'raw': response  # Removed to avoid serialization error
+                "sources": sources,
+                "debug_chunks": debug_chunks,
+                "debug_metadatas": debug_metadatas,
+                "rag_prompt": rag_prompt
             }
-            
         except Exception as e:
             logger.error(f"Error with RAG processing: {str(e)}")
             return {
