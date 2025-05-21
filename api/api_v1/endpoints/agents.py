@@ -71,10 +71,15 @@ async def get_agent_types():
             "input_type": "document",
             "output_type": "text",
             "api_key_required": "False"
-        },
-        {
+        },        {
             "type": "custom_endpoint_llm",
             "input_type": "text",
+            "output_type": "text",
+            "api_key_required": "True"
+        },
+        {
+            "type": "rag",
+            "input_type": "document",
             "output_type": "text",
             "api_key_required": "True"
         },
@@ -984,4 +989,117 @@ async def translate_text(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error during translation: {str(e)}"
+        )
+
+@router.post("/{agent_id}/run/rag_document")
+async def run_rag_agent_with_document(
+    agent_id: int,
+    query: str = Form(...),
+    document: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Run a RAG agent with a query and uploaded document
+    
+    Args:
+        agent_id: ID of the RAG agent to use
+        query: User query to answer from the document
+        document: PDF document to process
+    """
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    # Get the agent
+    db_agent = db.query(Agent).filter(
+        Agent.id == agent_id
+    ).first()
+    
+    if not db_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent with ID {agent_id} not found"
+        )
+    
+    if db_agent.agent_type.lower() != "rag":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent with ID {agent_id} is not a RAG agent"
+        )
+    
+    # Get API key for Gemini
+    api_key_obj = db.query(APIKey).filter(
+        APIKey.user_id == current_user_id,
+        APIKey.provider == "gemini"
+    ).first()
+    
+    if not api_key_obj:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Gemini API key is required for RAG agent"
+        )
+    
+    api_key = decrypt_api_key(api_key_obj.api_key)
+    
+    # Validate file type
+    if not document.filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF documents are supported"
+        )
+    
+    try:
+        # Read document content
+        document_content = await document.read()
+        
+        # Create process record
+        process = Process(
+            mini_service_id=None,  # Not associated with a mini service
+            user_id=current_user_id,
+            total_tokens={}  # Will update after processing
+        )
+        db.add(process)
+        db.commit()
+        db.refresh(process)
+        
+        # Create agent instance with API key
+        config = db_agent.config.copy() if db_agent.config else {}
+        config["api_key"] = api_key
+        
+        agent_instance = create_agent(
+            db_agent.agent_type,
+            config,
+            db_agent.system_instruction
+        )
+        
+        # Process the document and query
+        context = {
+            "document_content": document_content,
+            "filename": document.filename,
+            "process_id": process.id
+        }
+        
+        result = await agent_instance.process(query, context)
+        
+        # Update the process record with token usage
+        if "token_usage" in result:
+            process.total_tokens = result["token_usage"]
+            db.commit()
+        
+        create_log(
+            db=db,
+            user_id=current_user_id,
+            log_type=3,  # Custom log type for RAG
+            description=f"Successfully processed document '{document.filename}' with RAG agent '{db_agent.name}'"
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error processing document with RAG agent: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing document: {str(e)}"
         )
