@@ -12,6 +12,7 @@ from .gemini_image_generation_agent import GeminiImageGeneration
 from .internet_research_agent import InternetResearchAgent
 from .document_parser_agent import DocumentParserAgent
 from .custom_endpoint_agent import CustomEndpointAgent
+from .google_translate_agent import GoogleTranslateAgent
 import logging
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,8 @@ def create_agent(agent_type: str, config: Dict[str, Any], system_instruction: st
         return DocumentParserAgent(config, system_instruction)
     elif agent_type.lower() == "custom_endpoint":
         return CustomEndpointAgent(config, system_instruction)
+    elif agent_type.lower() == "google_translate":
+        return GoogleTranslateAgent(config, system_instruction)
     else:
         logger.error(f"Unknown agent type: {agent_type}")
         raise ValueError(f"Unknown agent type: {agent_type}")

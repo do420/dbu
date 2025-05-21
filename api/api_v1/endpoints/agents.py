@@ -78,6 +78,12 @@ async def get_agent_types():
             "output_type": "text",
             "api_key_required": "True"
         },
+        {
+            "type": "google_translate",
+            "input_type": "text",
+            "output_type": "text",
+            "api_key_required": "False"
+        },
     ]
     return agent_types
 
@@ -863,4 +869,119 @@ async def run_image_agent(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing image generation with agent: {str(e)}"
+        )
+
+@router.get("/languages/translate", response_model=Dict[str, str])
+async def list_translate_languages():
+    """List all supported languages for translation"""
+    from agents.google_translate_agent import GoogleTranslateAgent
+    languages = GoogleTranslateAgent.get_supported_languages()
+    return languages
+
+
+@router.post("/{agent_id}/translate")
+async def translate_text(
+    agent_id: int,
+    input_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user_id: int = None  # Replace with actual user ID from authentication
+):
+    """Translate text using the Google Translate agent
+    
+    Parameters:
+    - input: Text to translate
+    - context: Optional context with target_language
+    """
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    # Get the agent
+    db_agent = db.query(Agent).filter(
+        Agent.id == agent_id,
+    ).first()
+    
+    if not db_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent with ID {agent_id} not found"
+        )
+    
+    # Verify this is a google_translate agent
+    if db_agent.agent_type != "google_translate":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent with ID {agent_id} is not a Google Translate agent"
+        )
+    
+    # Extract input text
+    input_text = input_data.get("input", "")
+    if not input_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Input text is required"
+        )
+    
+    # Create a process record for this operation
+    process = Process(
+        user_id=current_user_id,
+        total_tokens={"total_tokens": len(input_text.split())},  # Approximate token count
+        mini_service_id=-1  # Direct agent use, not part of a service
+    )
+    db.add(process)
+    db.commit()
+    db.refresh(process)
+    
+    # Create agent instance
+    try:
+        agent_instance = create_agent(
+            db_agent.agent_type, 
+            db_agent.config, 
+            db_agent.system_instruction
+        )
+    except Exception as e:
+        # Clean up the process record
+        db.delete(process)
+        db.commit()
+        
+        logger.error(f"Failed to initialize GoogleTranslate agent {agent_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initialize GoogleTranslate agent {agent_id}: {str(e)}"
+        )
+    
+    # Process with the agent
+    try:
+        context = input_data.get("context", {})
+        context["process_id"] = process.id
+        
+        result = await agent_instance.process(input_text, context)
+        
+        if "error" in result:
+            # Clean up the process record
+            db.delete(process)
+            db.commit()
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+        
+        # Add process_id to the result
+        result["process_id"] = process.id
+        
+        db.commit()
+        
+        return result
+    except Exception as e:
+        # Clean up the process record
+        db.delete(process)
+        db.commit()
+        
+        logger.error(f"Error during translation: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error during translation: {str(e)}"
         )
