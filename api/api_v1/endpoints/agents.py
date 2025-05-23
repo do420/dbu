@@ -80,7 +80,7 @@ async def get_agent_types():
         },
         {
             "type": "rag",
-            "input_type": "document",
+            "input_type": "text",
             "output_type": "text",
             "api_key_required": "True"
         },
@@ -274,7 +274,18 @@ async def list_agents(
     #.filter(
     #    Agent.owner_id == current_user_id
     #)
-    agents = db.query(Agent).offset(skip).limit(limit).all()
+    if current_user_id is not None:
+        # For RAG agents, only return those owned by the current user
+        # For other agent types, return all
+        agents = db.query(Agent).filter(
+            (Agent.agent_type != "rag") | 
+            ((Agent.agent_type == "rag") & (Agent.owner_id == current_user_id))
+        ).offset(skip).limit(limit).all()
+    else:
+        # If no user ID provided, only return non-RAG agents
+        agents = db.query(Agent).filter(
+            Agent.agent_type != "rag"
+        ).offset(skip).limit(limit).all()
     return agents
 
 @router.get("/{agent_id}", response_model=AgentInDB)
@@ -427,12 +438,8 @@ async def run_agent(
     # Create agent instance
     try:
         config = db_agent.config.copy()
-        # For RAG agents, instruct to use /run/rag_document instead
-        if db_agent.agent_type.lower() == "rag":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="For RAG agents, please use the /run/rag_document endpoint instead of /run."
-            )
+       
+       
         agent_instance = create_agent(
             db_agent.agent_type, 
             config, 
