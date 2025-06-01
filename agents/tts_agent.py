@@ -23,7 +23,7 @@ class TTSAgent(BaseAgent):
             self.config["voice"] = "en-US-ChristopherNeural"
         
         # Set default output directory
-        self.output_dir = self.config.get("output_dir", "_OUTPUT")
+        self.output_dir = "_OUTPUT"
         os.makedirs(self.output_dir, exist_ok=True)
         
         # Set rate/pitch if specified

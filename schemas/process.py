@@ -1,9 +1,9 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pydantic import BaseModel
 from datetime import datetime
 
 class ProcessBase(BaseModel):
-    mini_service_id: int
+    mini_service_id: Optional[int] = None
     total_tokens: Dict[str, Any]
 
 class ProcessCreate(ProcessBase):

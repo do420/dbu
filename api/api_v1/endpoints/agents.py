@@ -377,10 +377,14 @@ async def delete_agent(
             detail=f"Agent with ID {agent_id} not found"
         )
     
-    # Check if the agent is used in any mini-service
-    mini_service_usage = db.query(Process).filter(
-        Process.mini_service_id == agent_id
+    # Check if the agent is used in any mini-service by querying the MiniService table and checking if the agent_id is in the workflow
+    from models.mini_service import MiniService
+    mini_service_usage = db.query(MiniService).filter(
+        MiniService.workflow.contains({"agent_id": agent_id})
     ).first()
+    # If the agent is used in a mini-service, raise an error
+   
+   
     
     if mini_service_usage:
         raise HTTPException(
@@ -531,15 +535,7 @@ async def generate_speech(
             detail="Input text is required"
         )
         
-    # Create a process record for this operation
-    process = Process(
-        user_id=current_user_id,
-        total_tokens={"total_tokens": len(input_text.split())},  # Approximate token count
-        mini_service_id=-1 #stands for no mini-service, direct use
-    )
-    db.add(process)
-    db.commit()
-    db.refresh(process)
+   
     
     # Create agent instance
     try:
@@ -558,8 +554,7 @@ async def generate_speech(
     # Process with the agent
     try:
         context = input_data.get("context", {})
-        # Add process_id to context
-        context["process_id"] = process.id
+       
         
         result = await agent_instance.process(input_text, context)
         
@@ -587,13 +582,11 @@ async def generate_speech(
         )
     except HTTPException:
         # Clean up the process record
-        db.delete(process)
-        db.commit()
+       
         raise
     except Exception as e:
         # Clean up the process record
-        db.delete(process)
-        db.commit()
+       
         
         logger.error(f"Error processing with TTS agent: {str(e)}")
         raise HTTPException(
@@ -648,16 +641,7 @@ async def generate_bark_speech(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Input text is required"
         )
-        
-    # Create a process record for this operation
-    process = Process(
-        user_id=current_user_id,
-        total_tokens={"total_tokens": len(input_text.split())},  # Approximate token count
-        mini_service_id=-1  # Direct agent use, not part of a service
-    )
-    db.add(process)
-    db.commit()
-    db.refresh(process)
+   
     
     # Create agent instance
     try:
@@ -677,7 +661,6 @@ async def generate_bark_speech(
     try:
         context = input_data.get("context", {})
         # Add process_id to context
-        context["process_id"] = process.id
         
         result = await agent_instance.process(input_text, context)
         
@@ -705,13 +688,11 @@ async def generate_bark_speech(
         )
     except HTTPException:
         # Clean up the process record
-        db.delete(process)
-        db.commit()
+       
         raise
     except Exception as e:
         # Clean up the process record
-        db.delete(process)
-        db.commit()
+       
         
         logger.error(f"Error processing with Bark TTS agent: {str(e)}")
         raise HTTPException(
@@ -771,15 +752,7 @@ async def transcribe_media(
             detail=f"Agent with ID {agent_id} is not a transcription agent"
         )
     
-    # Create a process record for this operation
-    process = Process(
-        user_id=current_user_id,
-        total_tokens={},  # No tokens for transcription
-        mini_service_id=-1  # Direct agent use, not part of a service
-    )
-    db.add(process)
-    db.commit()
-    db.refresh(process)
+   
     
     # Save the uploaded file to _INPUT directory
     filename = f"upload_{process.id}_{file.filename}"
@@ -833,7 +806,7 @@ async def transcribe_media(
     # Process with the agent
     try:
         # Add process_id to context
-        context = {"process_id": process.id, "language": language}
+        context = {"language": language}
         
         # Prepare input data
         transcribe_input = {
@@ -846,16 +819,15 @@ async def transcribe_media(
         
         if "error" in result:
             # Clean up the process record
-            db.delete(process)
-            db.commit()
+        
             
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=result["error"]
             )
         
-        # Add process_id to the result
-        result["process_id"] = process.id
+      
+       
         
         # Add the original filename to the result
         result["original_filename"] = file.filename
@@ -872,8 +844,7 @@ async def transcribe_media(
         raise
     except Exception as e:
         # Clean up the process record and file
-        db.delete(process)
-        db.commit()
+      
         try:
             os.remove(file_path)
         except:
@@ -1014,15 +985,8 @@ async def translate_text(
             detail="Input text is required"
         )
     
-    # Create a process record for this operation
-    process = Process(
-        user_id=current_user_id,
-        total_tokens={"total_tokens": len(input_text.split())},  # Approximate token count
-        mini_service_id=-1  # Direct agent use, not part of a service
-    )
-    db.add(process)
-    db.commit()
-    db.refresh(process)
+  
+   
     
     # Create agent instance
     try:
@@ -1033,8 +997,7 @@ async def translate_text(
         )
     except Exception as e:
         # Clean up the process record
-        db.delete(process)
-        db.commit()
+       
         
         logger.error(f"Failed to initialize GoogleTranslate agent {agent_id}: {str(e)}")
         raise HTTPException(
@@ -1045,31 +1008,28 @@ async def translate_text(
     # Process with the agent
     try:
         context = input_data.get("context", {})
-        context["process_id"] = process.id
+        
         
         result = await agent_instance.process(input_text, context)
         
         if "error" in result:
             # Clean up the process record
-            db.delete(process)
-            db.commit()
+           
             
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=result["error"]
             )
         
-        # Add process_id to the result
-        result["process_id"] = process.id
+    
+       
         
         db.commit()
         
         return result
     except Exception as e:
         # Clean up the process record
-        db.delete(process)
-        db.commit()
-        
+       
         logger.error(f"Error during translation: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1110,15 +1070,8 @@ async def run_rag_agent_with_document(
             detail=f"Agent with ID {agent_id} is not a RAG agent"
         )
     try:
-        # Create process record
-        process = Process(
-            mini_service_id=None,
-            user_id=current_user_id,
-            total_tokens={}
-        )
-        db.add(process)
-        db.commit()
-        db.refresh(process)
+     
+     
         # Use the persistent directory for ChromaDB per agent (by name or id)
         chroma_dir = os.path.join("db", "chroma", f"rag_collection_{db_agent.name}")
         if not os.path.exists(chroma_dir):
@@ -1155,14 +1108,10 @@ async def run_rag_agent_with_document(
         result = {
             "answer": response.text,
             "source_documents": source_documents[:3],  # Include top 3 sources
-            "process_id": process.id
+          
         }
         # Update process with token usage estimate
-        process.total_tokens = {
-            "input_tokens": len(prompt.split()),
-            "output_tokens": len(response.text.split()),
-            "total_tokens": len(prompt.split()) + len(response.text.split())
-        }
+       
         db.commit()
         return result
     except Exception as e:
