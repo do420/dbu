@@ -36,7 +36,38 @@ class TTSAgent(BaseAgent):
         """Get a list of all available voices"""
         if not TTSAgent._supported_voices:
             try:
-                TTSAgent._supported_voices = await edge_tts.list_voices()
+                raw_voices = await edge_tts.list_voices()
+                # Convert the complex voice data to simple string format
+                formatted_voices = []
+                for voice in raw_voices:
+                    # Convert VoiceTag from complex object to simple string
+                    voice_tag = voice.get("VoiceTag", {})
+                    if isinstance(voice_tag, dict):
+                        # Extract meaningful info from VoiceTag and convert to string
+                        content_categories = voice_tag.get("ContentCategories", [])
+                        voice_personalities = voice_tag.get("VoicePersonalities", [])
+                        tag_parts = []
+                        if content_categories:
+                            tag_parts.append(f"Categories: {', '.join(content_categories)}")
+                        if voice_personalities:
+                            tag_parts.append(f"Personalities: {', '.join(voice_personalities)}")
+                        voice_tag_str = "; ".join(tag_parts) if tag_parts else "General"
+                    else:
+                        voice_tag_str = str(voice_tag) if voice_tag else "General"
+                    
+                    formatted_voice = {
+                        "Name": str(voice.get("Name", "")),
+                        "ShortName": str(voice.get("ShortName", "")),
+                        "Gender": str(voice.get("Gender", "")),
+                        "Locale": str(voice.get("Locale", "")),
+                        "SuggestedCodec": str(voice.get("SuggestedCodec", "")),
+                        "FriendlyName": str(voice.get("FriendlyName", "")),
+                        "Status": str(voice.get("Status", "")),
+                        "VoiceTag": voice_tag_str
+                    }
+                    formatted_voices.append(formatted_voice)
+                
+                TTSAgent._supported_voices = formatted_voices
             except Exception as e:
                 logger.error(f"Failed to retrieve voice list: {str(e)}")
                 return []

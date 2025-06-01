@@ -495,6 +495,79 @@ async def list_tts_languages():
     return languages
 
 
+@router.post("/test-tts", response_class=FileResponse)
+async def test_tts_configuration_frontend(test_data: Dict[str, Any]):
+    """Test TTS configuration with a sample text and return audio file (frontend endpoint)"""
+    from agents.tts_agent import TTSAgent
+    import tempfile
+    import os
+    
+    try:
+        # Get test parameters from nested config structure
+        config_data = test_data.get("config", {})
+        voice = config_data.get("voice", "en-US-ChristopherNeural")
+        test_text = test_data.get("text", "Hello, this is a test of the text-to-speech configuration.")
+        rate = config_data.get("rate", "+0%")
+        volume = config_data.get("volume", "+0%")
+        pitch = config_data.get("pitch", "+0Hz")
+        
+        # Create a temporary TTS agent with test configuration
+        config = {
+            "voice": voice,
+            "rate": rate,
+            "volume": volume,
+            "pitch": pitch
+        }
+        
+        agent_instance = TTSAgent(config, "")
+        
+        # Create context with temporary file handling
+        context = {
+            "filename": "tts_test_audio.mp3",
+            "process_id": "test"
+        }
+        
+        # Test the TTS conversion
+        result = await agent_instance.process(test_text, context)
+        
+        if "error" in result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+        
+        # Get the path to the audio file
+        audio_file_path = result.get("audio_file")
+        
+        if not audio_file_path or not os.path.exists(audio_file_path):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate test audio file"
+            )
+        
+        # Return the audio file
+        filename = f"tts_test_{voice}.mp3"
+        return FileResponse(
+            path=audio_file_path,
+            media_type="audio/mpeg",
+            filename=filename,
+            headers={
+                "X-Voice-Used": result.get("voice", voice),
+                "X-Voice-Info": str(result.get("voice_info", {})),
+                "X-Text-Length": str(result.get("text_length", len(test_text)))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TTS configuration test failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"TTS configuration test failed: {str(e)}"
+        )
+
+
 @router.post("/{agent_id}/tts", response_class=FileResponse)
 async def generate_speech(
     agent_id: int,
