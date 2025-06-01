@@ -20,7 +20,7 @@ class MiniServiceInDB(MiniServiceBase):
     average_token_usage: Dict[str, Any]
     run_time: int
     is_enhanced: Optional[bool] = False  # Changed to Optional with default=False
-    
+    owner_username: Optional[str] = None  # Added username field
 
     class Config:
         orm_mode = True

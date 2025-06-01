@@ -13,6 +13,7 @@ from schemas.mini_service import MiniServiceCreate, MiniServiceInDB
 from agents import create_agent
 from agents.multi_agent import WorkflowProcessor
 import logging
+from models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -337,15 +338,24 @@ async def list_mini_services(
         )
     
     # Fetch mini services that are public or owned by the current user
-    mini_services = db.query(MiniService).filter(
+    
+    mini_services = db.query(
+        MiniService, User.username
+    ).join(
+        User, MiniService.owner_id == User.id
+    ).filter(
         (MiniService.is_public == True) | 
         (MiniService.owner_id == current_user_id)
     ).offset(skip).limit(limit).all()
     
-
-
+    # Add owner_username to each mini service
+    result = []
+    for mini_service, username in mini_services:
+        mini_service_dict = mini_service.__dict__
+        mini_service_dict["owner_username"] = username
+        result.append(mini_service_dict)
     
-    return mini_services
+    return result
 
 @router.get("/{service_id}", response_model=MiniServiceInDB)
 async def get_mini_service(
