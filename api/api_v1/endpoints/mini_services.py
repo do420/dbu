@@ -1,6 +1,7 @@
 import os
 from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -566,3 +567,63 @@ async def list_service_audio_files(
             })
     
     return audio_files
+
+
+
+@router.post("/upload")
+async def upload_file(
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Upload a file for processing"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    # Check file size (limit to 200MB)
+    max_size = 200 * 1024 * 1024  # 200MB
+    file_content = await file.read()
+    if len(file_content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File size exceeds 200MB limit"
+        )
+    
+    # Create uploads directory if it doesn't exist
+    upload_dir = "_INPUT"
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    # Generate unique filename
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ""
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = os.path.join(upload_dir, unique_filename)
+    
+    try:
+        # Save file
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+        
+        create_log(
+            db=db,
+            user_id=current_user_id,
+            log_type=0,
+            description=f"Uploaded file: {file.filename} ({len(file_content)} bytes)"
+        )
+        
+        return {
+            "filename": file.filename,
+            "saved_as": unique_filename,
+            "size": len(file_content),
+            "content_type": file.content_type,
+            "file_path": file_path
+        }
+        
+    except Exception as e:
+        logger.error(f"Error saving uploaded file: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save file: {str(e)}"
+        )
