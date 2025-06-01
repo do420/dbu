@@ -7,6 +7,7 @@ from models.agent import Agent
 from models.mini_service import MiniService
 from models.process import Process
 from models.log import Log
+from models.favorite_service import FavoriteService
 
 # This ensures that all models are registered with SQLAlchemy metadata
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     "Agent", 
     "MiniService", 
     "Process", 
-    "Log"
+    "Log",
+    "FavoriteService"
 ]
