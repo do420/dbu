@@ -371,7 +371,7 @@ async def list_mini_services(
         tts_types = {"transcribe", "tts", "bark_tts", "edge_tts"}
         if agent_types and not (agent_types & external_types):
             # Only TTS/transcribe agents, show token usage as "-"
-            mini_service_dict["average_token_usage"] = {"-"}
+            mini_service_dict["average_token_usage"] = {key: "-" for key in mini_service_dict.get("average_token_usage", {})}
         # else: leave as is (JSON/dict)
 
         result.append(mini_service_dict)
