@@ -84,7 +84,7 @@ class BarkTTSAgent(BaseAgent):
                 "voice_preset": voice_preset,
                 "text_length": len(input_text),
                 "agent_type": "bark_tts",
-                "token_usage": {"total_tokens": len(input_text.split())}  # Approximate token count
+                "token_usage": {}  # Approximate token count
             }
         except Exception as e:
             logger.error(f"Error with Bark TTS conversion: {str(e)}")

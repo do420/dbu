@@ -14,6 +14,7 @@ from agents import create_agent
 from agents.multi_agent import WorkflowProcessor
 import logging
 from models.user import User
+from sqlalchemy.orm.attributes import flag_modified
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -273,18 +274,15 @@ async def run_mini_service(
         mini_service.run_time += 1
         
         # Update average token usage
-        if mini_service.average_token_usage:
-            for key, value in token_usage.items():
-                if key in mini_service.average_token_usage:
-                    # Calculate new average
-                    mini_service.average_token_usage[key] = (
-                        (mini_service.average_token_usage[key] * (mini_service.run_time - 1) + value) 
-                        / mini_service.run_time
-                    )
-                else:
-                    mini_service.average_token_usage[key] = value
-        else:
-            mini_service.average_token_usage = token_usage
+        for key, value in token_usage.items():
+            prev_avg = mini_service.average_token_usage.get(key, None)
+            if prev_avg is not None and mini_service.run_time > 1:
+                mini_service.average_token_usage[key] = (
+                    (prev_avg * (mini_service.run_time - 1) + value) / mini_service.run_time
+                )
+            else:
+                mini_service.average_token_usage[key] = value
+        flag_modified(mini_service, "average_token_usage")
         
         # Add process_id to the result for easy reference
         result["process_id"] = process.id
@@ -351,8 +349,31 @@ async def list_mini_services(
     # Add owner_username to each mini service
     result = []
     for mini_service, username in mini_services:
-        mini_service_dict = mini_service.__dict__
+        mini_service_dict = mini_service.__dict__.copy()
         mini_service_dict["owner_username"] = username
+
+        # Extract agent IDs from workflow
+        workflow = mini_service_dict.get("workflow", {})
+        agent_ids = set()
+        for node in workflow.get("nodes", {}).values():
+            agent_id = node.get("agent_id")
+            if agent_id is not None:
+                agent_ids.add(int(agent_id))
+
+        # Query agent types
+        agent_types = set()
+        if agent_ids:
+            agents = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+            agent_types = set(a.agent_type.lower() for a in agents)
+
+        # Determine if any agent is external
+        external_types = {"gemini", "openai"}
+        tts_types = {"transcribe", "tts", "bark_tts", "edge_tts"}
+        if agent_types and not (agent_types & external_types):
+            # Only TTS/transcribe agents, show token usage as "-"
+            mini_service_dict["average_token_usage"] = {"-"}
+        # else: leave as is (JSON/dict)
+
         result.append(mini_service_dict)
     
     return result

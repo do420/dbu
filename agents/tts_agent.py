@@ -104,7 +104,7 @@ class TTSAgent(BaseAgent):
                 "voice_info": voice_info,
                 "text_length": len(input_text),
                 "agent_type": "tts",
-                "token_usage": {"total_tokens": len(input_text.split())}  # Approximate token count
+                "token_usage": {}  
             }
         except Exception as e:
             logger.error(f"Error with TTS conversion: {str(e)}")
@@ -112,7 +112,7 @@ class TTSAgent(BaseAgent):
                 "output": f"Error with TTS conversion: {str(e)}",
                 "error": str(e),
                 "agent_type": "tts",
-                "token_usage": {"total_tokens": 0}
+                "token_usage": {}
             }
     
     @staticmethod
