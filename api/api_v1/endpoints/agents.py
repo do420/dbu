@@ -8,7 +8,9 @@ from db.session import get_db
 from models.agent import Agent
 from models.api_key import APIKey
 from models.process import Process
+from models.favorite_agent import FavoriteAgent
 from schemas.agent import AgentCreate, AgentInDB
+from schemas.favorite_agent import FavoriteAgentCreate, FavoriteAgentInDB, FavoriteAgentCountResponse
 from agents import create_agent
 from core.security import decrypt_api_key
 import logging
@@ -89,6 +91,12 @@ async def get_agent_types():
             "input_type": "text",
             "output_type": "text",
             "api_key_required": "False"
+        },
+        {
+            "type": "claude",
+            "input_type": "text",
+            "output_type": "text",
+            "api_key_required": "True"
         },
     ]
     return agent_types
@@ -281,12 +289,37 @@ async def list_agents(
             (Agent.agent_type != "rag") | 
             ((Agent.agent_type == "rag") & (Agent.owner_id == current_user_id))
         ).offset(skip).limit(limit).all()
-    else:
-        # If no user ID provided, only return non-RAG agents
+    else:        # If no user ID provided, only return non-RAG agents
         agents = db.query(Agent).filter(
             Agent.agent_type != "rag"
         ).offset(skip).limit(limit).all()
     return agents
+
+@router.get("/favorites", response_model=List[AgentInDB])
+async def get_favorite_agents(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Get user's favorite agents"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    # Get favorite agents with join
+    favorite_agents = db.query(Agent).join(
+        FavoriteAgent,
+        Agent.id == FavoriteAgent.agent_id
+    ).filter(
+        FavoriteAgent.user_id == current_user_id
+    ).order_by(
+        FavoriteAgent.created_at.desc()
+    ).offset(skip).limit(limit).all()
+    
+    return favorite_agents
 
 @router.get("/{agent_id}", response_model=AgentInDB)
 async def get_agent(
@@ -790,144 +823,144 @@ async def list_transcribe_languages():
     return languages
 
 
-@router.post("/{agent_id}/transcribe", response_model=Dict[str, Any])
-async def transcribe_media(
-    agent_id: int,
-    db: Session = Depends(get_db),
-    current_user_id: int = 1,  # Replace with actual user ID from authentication
-    file: UploadFile = File(...),
-    language: str = Form("en"),
-    include_timestamps: bool = Form(False)
-):
-    """
-    Transcribe an uploaded media file
+# @router.post("/{agent_id}/transcribe", response_model=Dict[str, Any])
+# async def transcribe_media(
+#     agent_id: int,
+#     db: Session = Depends(get_db),
+#     current_user_id: int = 1,  # Replace with actual user ID from authentication
+#     file: UploadFile = File(...),
+#     language: str = Form("en"),
+#     include_timestamps: bool = Form(False)
+# ):
+#     """
+#     Transcribe an uploaded media file
     
-    Parameters:
-    - file: The audio/video file to transcribe
-    - language: Language code (optional, defaults to 'en')
-    - include_timestamps: Whether to include timestamps in the output (optional)
-    """
-    # Get the agent
-    db_agent = db.query(Agent).filter(
-        Agent.id == agent_id,
-    ).first()
+#     Parameters:
+#     - file: The audio/video file to transcribe
+#     - language: Language code (optional, defaults to 'en')
+#     - include_timestamps: Whether to include timestamps in the output (optional)
+#     """
+#     # Get the agent
+#     db_agent = db.query(Agent).filter(
+#         Agent.id == agent_id,
+#     ).first()
     
-    if not db_agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent with ID {agent_id} not found"
-        )
+#     if not db_agent:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail=f"Agent with ID {agent_id} not found"
+#         )
     
-    # Verify this is a transcribe agent
-    if db_agent.agent_type not in ["transcribe", "whisperx"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Agent with ID {agent_id} is not a transcription agent"
-        )
+#     # Verify this is a transcribe agent
+#     if db_agent.agent_type not in ["transcribe", "whisperx"]:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=f"Agent with ID {agent_id} is not a transcription agent"
+#         )
     
    
     
-    # Save the uploaded file to _INPUT directory
-    filename = f"upload_{process.id}_{file.filename}"
-    input_dir = "_INPUT"
-    os.makedirs(input_dir, exist_ok=True)
-    file_path = os.path.join(input_dir, filename)
+#     # Save the uploaded file to _INPUT directory
+#     filename = f"upload_{process.id}_{file.filename}"
+#     input_dir = "_INPUT"
+#     os.makedirs(input_dir, exist_ok=True)
+#     file_path = os.path.join(input_dir, filename)
     
-    try:
-        # Save uploaded file
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        db.delete(process)
-        db.commit()
-        logger.error(f"Error saving uploaded file: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error saving uploaded file: {str(e)}"
-        )
-    finally:
-        # Reset file position
-        await file.seek(0)
+#     try:
+#         # Save uploaded file
+#         with open(file_path, "wb") as buffer:
+#             shutil.copyfileobj(file.file, buffer)
+#     except Exception as e:
+#         db.delete(process)
+#         db.commit()
+#         logger.error(f"Error saving uploaded file: {e}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Error saving uploaded file: {str(e)}"
+#         )
+#     finally:
+#         # Reset file position
+#         await file.seek(0)
     
-    # Update agent config with additional parameters if provided
-    config = db_agent.config.copy()
-    if include_timestamps is not None:
-        config["include_timestamps"] = include_timestamps
+#     # Update agent config with additional parameters if provided
+#     config = db_agent.config.copy()
+#     if include_timestamps is not None:
+#         config["include_timestamps"] = include_timestamps
     
-    # Create agent instance
-    try:
-        agent_instance = create_agent(
-            db_agent.agent_type, 
-            config, 
-            db_agent.system_instruction
-        )
-    except Exception as e:
-        # Clean up the process record and file
-        db.delete(process)
-        db.commit()
-        try:
-            os.remove(file_path)
-        except:
-            pass
+#     # Create agent instance
+#     try:
+#         agent_instance = create_agent(
+#             db_agent.agent_type, 
+#             config, 
+#             db_agent.system_instruction
+#         )
+#     except Exception as e:
+#         # Clean up the process record and file
+#         db.delete(process)
+#         db.commit()
+#         try:
+#             os.remove(file_path)
+#         except:
+#             pass
         
-        logger.error(f"Failed to initialize transcription agent {agent_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initialize transcription agent {agent_id}: {str(e)}"
-        )
+#         logger.error(f"Failed to initialize transcription agent {agent_id}: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Failed to initialize transcription agent {agent_id}: {str(e)}"
+#         )
     
-    # Process with the agent
-    try:
-        # Add process_id to context
-        context = {"language": language}
+#     # Process with the agent
+#     try:
+#         # Add process_id to context
+#         context = {"language": language}
         
-        # Prepare input data
-        transcribe_input = {
-            "file_path": file_path,
-            "language": language
-        }
+#         # Prepare input data
+#         transcribe_input = {
+#             "file_path": file_path,
+#             "language": language
+#         }
         
-        # Call the agent with the file path
-        result = await agent_instance.process(transcribe_input, context)
+#         # Call the agent with the file path
+#         result = await agent_instance.process(transcribe_input, context)
         
-        if "error" in result:
-            # Clean up the process record
+#         if "error" in result:
+#             # Clean up the process record
         
             
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result["error"]
-            )
+#             raise HTTPException(
+#                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#                 detail=result["error"]
+#             )
         
       
        
         
-        # Add the original filename to the result
-        result["original_filename"] = file.filename
+#         # Add the original filename to the result
+#         result["original_filename"] = file.filename
         
-        db.commit()
+#         db.commit()
         
-        return result
-    except HTTPException:
-        # Clean up the file
-        try:
-            os.remove(file_path)
-        except:
-            pass
-        raise
-    except Exception as e:
-        # Clean up the process record and file
+#         return result
+#     except HTTPException:
+#         # Clean up the file
+#         try:
+#             os.remove(file_path)
+#         except:
+#             pass
+#         raise
+#     except Exception as e:
+#         # Clean up the process record and file
       
-        try:
-            os.remove(file_path)
-        except:
-            pass
+#         try:
+#             os.remove(file_path)
+#         except:
+#             pass
         
-        logger.error(f"Error during transcription: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error during transcription: {str(e)}"
-        )
+#         logger.error(f"Error during transcription: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Error during transcription: {str(e)}"
+#         )
     
 
 @router.post("/{agent_id}/run/image")
@@ -1193,197 +1226,131 @@ async def run_rag_agent_with_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing RAG query: {str(e)}"
         )
-# ...existing code...
-@router.post("/enhance_system_prompt", response_model=Dict[str, str])
-async def enhance_system_prompt(
-    agent_details: Dict[str, Any],
-    db: Session = Depends(get_db),
-    current_user_id: int = None
-):
-    """
-    Enhance a system prompt based on provided agent details.
-    
-    Parameters:
-    - agent_details: Dictionary containing:
-        - name: The agent name
-        - system_instruction: Current system instruction (if any)
-        - agent_type: Type of agent (gemini, openai, etc.)
-        - input_type: Type of input (text, document, etc.)
-        - output_type: Type of output (text, image, etc.)
-        - description: General description of the agent (optional)
-    
-    Returns:
-    - Dictionary with enhanced_prompt
-    """
-    if current_user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="current_user_id parameter is required"
-        )
-        
-    # Validate required fields
-    required_fields = ["name", "agent_type", "input_type", "output_type"]
-    for field in required_fields:
-        if field not in agent_details:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Missing required field: {field}"
-            )
-    
-    # Get user's Gemini API key
-    gemini_api_key_obj = db.query(APIKey).filter(
-        APIKey.user_id == current_user_id,
-        APIKey.provider == "gemini"
-    ).first()
-    
-    if not gemini_api_key_obj:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No Gemini API key found for prompt enhancement."
-        )
-    
-    gemini_api_key = decrypt_api_key(gemini_api_key_obj.api_key)
-    
-    # Get original system instruction or use empty string
-    original_instruction = agent_details.get("system_instruction", "")
-    description = agent_details.get("description", "")
-    
-    # Prepare enhancement prompt
-    enhancement_request = (
-        f"You are an expert prompt engineer. "
-        f"Given the following agent details, enhance and improve the system prompt for optimal performance. "
-        f"Agent Name: {agent_details['name']}\n"
-        f"Description: {description}\n"
-        f"Type: {agent_details['agent_type']}\n"
-        f"Input Type: {agent_details['input_type']}\n"
-        f"Output Type: {agent_details['output_type']}\n"
-        f"Original System Prompt: {original_instruction}\n\n"
-        f"Return ONLY the improved system prompt."
-    )
-    
-    # Use Gemini to enhance the prompt
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        
-        response = model.generate_content(enhancement_request)
-        enhanced_prompt = response.text.strip() if hasattr(response, "text") else str(response)
-        
-        # Log enhancement
-        create_log(
-            db=db,
-            user_id=current_user_id,
-            log_type=2,
-            description=f"Enhanced system prompt for agent '{agent_details['name']}' using Gemini."
-        )
-        
-        return {"enhanced_prompt": enhanced_prompt}
-    except Exception as e:
-        logger.error(f"Failed to enhance system prompt: {str(e)}")
-        create_log(
-            db=db,
-            user_id=current_user_id,
-            log_type=2,
-            description=f"Failed to enhance system prompt for agent '{agent_details['name']}': {str(e)}"
-        )
-        
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to enhance system prompt: {str(e)}"
-        )
+# ============ FAVORITE AGENTS ENDPOINTS ============
 
-
-@router.get("/{agent_id}/documents")
-async def get_agent_documents(
+@router.post("/{agent_id}/favorite", response_model=FavoriteAgentInDB)
+async def add_favorite_agent(
     agent_id: int,
     db: Session = Depends(get_db),
     current_user_id: int = None
 ):
-    """Get list of documents uploaded to a RAG agent."""
+    """Add an agent to user's favorites"""
     if current_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="current_user_id parameter is required"
         )
     
-    # Verify agent exists and belongs to user
-    db_agent = db.query(Agent).filter(
-        Agent.id == agent_id,
-        Agent.owner_id == current_user_id
-    ).first()
-    
-    if not db_agent:
+    # Check if agent exists
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent with ID {agent_id} not found"
         )
     
-    if db_agent.agent_type.lower() != "rag":
+    # Check if already favorited
+    existing_favorite = db.query(FavoriteAgent).filter(
+        FavoriteAgent.user_id == current_user_id,
+        FavoriteAgent.agent_id == agent_id
+    ).first()
+    
+    if existing_favorite:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Agent with ID {agent_id} is not a RAG agent"
+            detail="Agent is already in favorites"
         )
     
-    try:
-        # Check ChromaDB collection directory
-        chroma_dir = os.path.join("db", "chroma", f"rag_collection_{db_agent.name}")
-        if not os.path.exists(chroma_dir):
-            # Try fallback to id-based dir for backward compatibility
-            chroma_dir = os.path.join("db", "chroma", f"rag_collection_{agent_id}")
-        
-        if not os.path.exists(chroma_dir):
-            return {"documents": []}
-        
-        # Load ChromaDB collection and get documents
-        from langchain_community.vectorstores import Chroma
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        
-        # Get user's Gemini API key for embeddings
-        gemini_api_key_obj = db.query(APIKey).filter(
-            APIKey.user_id == current_user_id,
-            APIKey.provider == "gemini"
-        ).first()
-        
-        if not gemini_api_key_obj:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Gemini API key required to access documents"
-            )
-        
-        gemini_api_key = decrypt_api_key(gemini_api_key_obj.api_key)
-        
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=gemini_api_key
-        )
-        
-        chroma_db = Chroma(
-            embedding_function=embeddings,
-            persist_directory=chroma_dir
-        )
-        
-        # Get all documents from the collection
-        # Perform a dummy search to get document metadata
-        all_docs = chroma_db.similarity_search("dummy", k=1000)  # Get many documents
-        
-        # Extract unique document sources/filenames
-        documents = {}
-        for doc in all_docs:
-            source = doc.metadata.get("source", "Unknown")
-            if source not in documents:
-                documents[source] = {
-                    "filename": os.path.basename(source) if source != "Unknown" else "Unknown",
-                    "source": source,
-                    "chunks": 0
-                }
-            documents[source]["chunks"] += 1
-        
-        return {"documents": list(documents.values())}
-        
-    except Exception as e:
-        logger.error(f"Error getting documents for agent {agent_id}: {str(e)}")
+    # Create favorite record
+    favorite = FavoriteAgent(
+        user_id=current_user_id,
+        agent_id=agent_id
+    )
+    
+    db.add(favorite)
+    db.commit()
+    db.refresh(favorite)
+    
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=1,
+        description=f"Added agent '{agent.name}' to favorites"
+    )
+    
+    return favorite
+
+
+@router.delete("/{agent_id}/favorite", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_favorite_agent(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Remove an agent from user's favorites"""
+    if current_user_id is None:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving documents: {str(e)}"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
         )
+    
+    # Find the favorite record
+    favorite = db.query(FavoriteAgent).filter(
+        FavoriteAgent.user_id == current_user_id,
+        FavoriteAgent.agent_id == agent_id
+    ).first()
+    
+    if not favorite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent is not in favorites"
+        )
+    
+    # Get agent name for logging
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    agent_name = agent.name if agent else f"Agent {agent_id}"
+    
+    db.delete(favorite)
+    db.commit()
+    
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=3,
+        description=f"Removed agent '{agent_name}' from favorites"
+    )
+    return None
+
+
+@router.get("/{agent_id}/favorite/status")
+async def check_favorite_status(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Check if an agent is in user's favorites"""
+    if current_user_id is None:
+        return {"is_favorite": False}
+    
+    favorite = db.query(FavoriteAgent).filter(
+        FavoriteAgent.user_id == current_user_id,
+        FavoriteAgent.agent_id == agent_id
+    ).first()
+    
+    return {"is_favorite": favorite is not None}
+
+
+@router.get("/{agent_id}/favorite/count", response_model=FavoriteAgentCountResponse)
+async def get_agent_favorite_count(
+    agent_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get the total number of users who have favorited this agent"""
+    count = db.query(FavoriteAgent).filter(
+        FavoriteAgent.agent_id == agent_id
+    ).count()
+    
+    return FavoriteAgentCountResponse(
+        agent_id=agent_id,
+        favorite_count=count
+    )

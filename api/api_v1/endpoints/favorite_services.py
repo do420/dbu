@@ -5,11 +5,13 @@ from sqlalchemy import func
 from db.session import get_db
 from models.favorite_service import FavoriteService
 from models.mini_service import MiniService
+from models.user import User
 from schemas.favorite_service import (
     FavoriteServiceCreate, 
     FavoriteServiceInDB, 
     FavoriteCountResponse
 )
+from schemas.mini_service import MiniServiceInDB
 from core.log_utils import create_log
 import logging
 
@@ -120,25 +122,52 @@ async def remove_favorite_service(
     db.commit()
 
 
-@router.get("/", response_model=List[FavoriteServiceInDB])
+@router.get("/", response_model=List[MiniServiceInDB])
 async def list_user_favorites(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user_id: int = None
 ):
-    """List user's favorite mini services"""
+    """List user's favorite mini services with full details"""
     if current_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="current_user_id parameter is required"
         )
     
-    favorites = db.query(FavoriteService).filter(
+    # Query favorites with mini service details and owner username
+    favorites_with_details = db.query(
+        MiniService, User.username
+    ).join(
+        FavoriteService, FavoriteService.mini_service_id == MiniService.id
+    ).join(
+        User, MiniService.owner_id == User.id
+    ).filter(
         FavoriteService.user_id == current_user_id
     ).offset(skip).limit(limit).all()
     
-    return favorites
+    # Format the response to include mini service details with owner username
+    result = []
+    for mini_service, owner_username in favorites_with_details:
+        mini_service_dict = {
+            "id": mini_service.id,
+            "name": mini_service.name,
+            "description": mini_service.description,
+            "workflow": mini_service.workflow,
+            "input_type": mini_service.input_type,
+            "output_type": mini_service.output_type,
+            "owner_id": mini_service.owner_id,
+            "created_at": mini_service.created_at,
+            "average_token_usage": mini_service.average_token_usage,
+            "run_time": mini_service.run_time,
+            "is_enhanced": mini_service.is_enhanced,
+            "is_public": mini_service.is_public,
+            "owner_username": owner_username
+        }
+        result.append(mini_service_dict)
+    
+    return result
 
 
 @router.get("/count/{mini_service_id}", response_model=FavoriteCountResponse)
