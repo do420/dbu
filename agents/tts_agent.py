@@ -82,11 +82,34 @@ class TTSAgent(BaseAgent):
             return filtered_voices[0]["ShortName"]
         return None
     
-    async def process(self, input_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def process(self, input_data: Any, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Convert input text to speech and return path to audio file"""
         context = context or {}
         
         try:
+
+                # Handle different input types
+            if isinstance(input_data, dict):
+                # If input is a dict (like RAG response), extract the text
+                if "response" in input_data:
+                    input_text = input_data["response"]
+                elif "output" in input_data:
+                    input_text = input_data["output"]
+                elif "text" in input_data:
+                    input_text = input_data["text"]
+                else:
+                    # If no recognizable text field, convert entire dict to string
+                    input_text = str(input_data)
+            elif isinstance(input_data, str):
+                input_text = input_data
+            else:
+                # Convert any other type to string
+                input_text = str(input_data)
+            
+            # Validate that we have actual text content
+            if not input_text or not input_text.strip():
+                raise ValueError("No valid text content found in input")
+            
             # Get voice from config or context
             voice = context.get("voice", self.config["voice"])
             

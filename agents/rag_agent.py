@@ -371,6 +371,7 @@ class RAGAgent(BaseAgent):
             }
             # Return debug info for troubleshooting
             return {
+                "output": response_text,
                 "status": "success",
                 "response": response_text,
                 "token_usage": token_usage,

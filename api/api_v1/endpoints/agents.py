@@ -1142,90 +1142,190 @@ async def translate_text(
             detail=f"Error during translation: {str(e)}"
         )
     
-@router.post("/{agent_id}/run/rag_document")
-async def run_rag_agent_with_document(
-    agent_id: int,
-    input: str = Form(...),
-    api_key: str = Form(...),  # Direct API key string
+
+@router.post("/enhance_system_prompt", response_model=Dict[str, str])
+async def enhance_system_prompt(
+    agent_details: Dict[str, Any],
     db: Session = Depends(get_db),
     current_user_id: int = None
 ):
-    """Run a RAG agent with a query using the precomputed ChromaDB collection."""
+    """
+    Enhance a system prompt based on provided agent details.
+    
+    Parameters:
+    - agent_details: Dictionary containing:
+        - name: The agent name
+        - system_instruction: Current system instruction (if any)
+        - agent_type: Type of agent (gemini, openai, etc.)
+        - input_type: Type of input (text, document, etc.)
+        - output_type: Type of output (text, image, etc.)
+        - description: General description of the agent (optional)
+    
+    Returns:
+    - Dictionary with enhanced_prompt
+    """
     if current_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="current_user_id parameter is required"
         )
-    if not input or not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="'input' and 'api_key' are required in the form body."
-        )
-    # Get the agent
-    db_agent = db.query(Agent).filter(
-        Agent.id == agent_id
-    ).first()
-    if not db_agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent with ID {agent_id} not found"
-        )
-    if db_agent.agent_type.lower() != "rag":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Agent with ID {agent_id} is not a RAG agent"
-        )
-    try:
-     
-     
-        # Use the persistent directory for ChromaDB per agent (by name or id)
-        chroma_dir = os.path.join("db", "chroma", f"rag_collection_{db_agent.name}")
-        if not os.path.exists(chroma_dir):
-            # Try fallback to id-based dir for backward compatibility
-            chroma_dir = os.path.join("db", "chroma", f"rag_collection_{agent_id}")
-        if not os.path.exists(chroma_dir):
+
+    # Validate required fields
+    required_fields = ["name", "agent_type", "input_type", "output_type"]
+    for field in required_fields:
+        if field not in agent_details:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"ChromaDB collection for agent {db_agent.name} not found."
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required field: {field}"
             )
-        # Load ChromaDB collection
-        from langchain_community.vectorstores import Chroma
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=api_key
+
+    # Get user's Gemini API key
+    gemini_api_key_obj = db.query(APIKey).filter(
+        APIKey.user_id == current_user_id,
+        APIKey.provider == "gemini"
+    ).first()
+
+    if not gemini_api_key_obj:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No Gemini API key found for prompt enhancement."
         )
-        chroma_db = Chroma(
-            embedding_function=embeddings,
-            persist_directory=chroma_dir
-        )
-        # Retrieve relevant document chunks for the input
-        relevant_chunks = chroma_db.similarity_search(input, k=5)
-        source_documents = [chunk.page_content for chunk in relevant_chunks]
-        source_text = "\n\n".join(source_documents)
-        # Create the Gemini prompt using input and sources
-        prompt = f"""Based on the following context from the document, please answer this question:\n\nQUESTION: {input}\n\nDOCUMENT CONTEXT:\n{source_text}\n\nAnswer the question based only on the information provided in the document context.\n"""
-        # Use Gemini to generate a response
+
+    gemini_api_key = decrypt_api_key(gemini_api_key_obj.api_key)
+
+    # Get original system instruction or use empty string
+    original_instruction = agent_details.get("system_instruction", "")
+    description = agent_details.get("description", "")
+
+    # Prepare enhancement prompt
+    enhancement_request = (
+        f"You are an expert prompt engineer. "
+        f"Given the following agent details, enhance and improve the system prompt for optimal performance. "
+        f"Agent Name: {agent_details['name']}\n"
+        f"Description: {description}\n"
+        f"Type: {agent_details['agent_type']}\n"
+        f"Input Type: {agent_details['input_type']}\n"
+        f"Output Type: {agent_details['output_type']}\n"
+        f"Original System Prompt: {original_instruction}\n\n"
+        f"Return ONLY the improved system prompt."
+    )
+
+    # Use Gemini to enhance the prompt
+    try:
         import google.generativeai as genai
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=gemini_api_key)
         model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(prompt)
-        # Prepare the result
-        result = {
-            "answer": response.text,
-            "source_documents": source_documents[:3],  # Include top 3 sources
-          
-        }
-        # Update process with token usage estimate
-       
-        db.commit()
-        return result
+
+        response = model.generate_content(enhancement_request)
+        enhanced_prompt = response.text.strip() if hasattr(response, "text") else str(response)
+
+        # Log enhancement
+        create_log(
+            db=db,
+            user_id=current_user_id,
+            log_type=2,
+            description=f"Enhanced system prompt for agent '{agent_details['name']}' using Gemini."
+        )
+
+        return {"enhanced_prompt": enhanced_prompt}
     except Exception as e:
-        logger.error(f"Error processing RAG query: {str(e)}")
+        logger.error(f"Failed to enhance system prompt: {str(e)}")
+        create_log(
+            db=db,
+            user_id=current_user_id,
+            log_type=2,
+            description=f"Failed to enhance system prompt for agent '{agent_details['name']}': {str(e)}"
+        )
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing RAG query: {str(e)}"
+            detail=f"Failed to enhance system prompt: {str(e)}"
         )
+
+# @router.post("/{agent_id}/run/rag_document")
+# async def run_rag_agent_with_document(
+#     agent_id: int,
+#     input: str = Form(...),
+#     api_key: str = Form(...),  # Direct API key string
+#     db: Session = Depends(get_db),
+#     current_user_id: int = None
+# ):
+#     """Run a RAG agent with a query using the precomputed ChromaDB collection."""
+#     if current_user_id is None:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="current_user_id parameter is required"
+#         )
+#     if not input or not api_key:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="'input' and 'api_key' are required in the form body."
+#         )
+#     # Get the agent
+#     db_agent = db.query(Agent).filter(
+#         Agent.id == agent_id
+#     ).first()
+#     if not db_agent:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail=f"Agent with ID {agent_id} not found"
+#         )
+#     if db_agent.agent_type.lower() != "rag":
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=f"Agent with ID {agent_id} is not a RAG agent"
+#         )
+#     try:
+     
+     
+#         # Use the persistent directory for ChromaDB per agent (by name or id)
+#         chroma_dir = os.path.join("db", "chroma", f"rag_collection_{db_agent.name}")
+#         if not os.path.exists(chroma_dir):
+#             # Try fallback to id-based dir for backward compatibility
+#             chroma_dir = os.path.join("db", "chroma", f"rag_collection_{agent_id}")
+#         if not os.path.exists(chroma_dir):
+#             raise HTTPException(
+#                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#                 detail=f"ChromaDB collection for agent {db_agent.name} not found."
+#             )
+#         # Load ChromaDB collection
+#         from langchain_community.vectorstores import Chroma
+#         from langchain_google_genai import GoogleGenerativeAIEmbeddings
+#         embeddings = GoogleGenerativeAIEmbeddings(
+#             model="models/embedding-001",
+#             google_api_key=api_key
+#         )
+#         chroma_db = Chroma(
+#             embedding_function=embeddings,
+#             persist_directory=chroma_dir
+#         )
+#         # Retrieve relevant document chunks for the input
+#         relevant_chunks = chroma_db.similarity_search(input, k=5)
+#         source_documents = [chunk.page_content for chunk in relevant_chunks]
+#         source_text = "\n\n".join(source_documents)
+#         # Create the Gemini prompt using input and sources
+#         prompt = f"""Based on the following context from the document, please answer this question:\n\nQUESTION: {input}\n\nDOCUMENT CONTEXT:\n{source_text}\n\nAnswer the question based only on the information provided in the document context.\n"""
+#         # Use Gemini to generate a response
+#         import google.generativeai as genai
+#         genai.configure(api_key=api_key)
+#         model = genai.GenerativeModel("gemini-1.5-flash")
+#         response = model.generate_content(prompt)
+#         # Prepare the result
+#         result = {
+#             "answer": response.text,
+#             "source_documents": source_documents[:3],  # Include top 3 sources
+          
+#         }
+#         # Update process with token usage estimate
+       
+#         db.commit()
+#         return result
+#     except Exception as e:
+#         logger.error(f"Error processing RAG query: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Error processing RAG query: {str(e)}"
+        # )
 # ============ FAVORITE AGENTS ENDPOINTS ============
 
 @router.post("/{agent_id}/favorite", response_model=FavoriteAgentInDB)
