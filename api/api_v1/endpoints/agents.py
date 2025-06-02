@@ -90,6 +90,12 @@ async def get_agent_types():
             "output_type": "text",
             "api_key_required": "False"
         },
+        {
+            "type": "claude",
+            "input_type": "text",
+            "output_type": "text",
+            "api_key_required": "True"
+        },
     ]
     return agent_types
 
