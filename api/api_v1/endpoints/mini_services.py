@@ -725,11 +725,20 @@ async def chat_generate_mini_service(
                 agent_id_mapping = {}
                 
                 for idx, agent_data in enumerate(service_specification["agents"]):
+                    # Create agent config with unique identifiers for RAG agents
+                    agent_config = agent_data.get("config", {})
+                    
+                    # For RAG agents, ensure unique collection configuration
+                    if agent_data["agent_type"] == "rag":
+                        agent_config["agent_name"] = agent_data["name"]
+                        # Use a temporary ID that will be updated after DB commit
+                        agent_config["agent_id"] = f"temp_{idx}_{current_user_id}"
+                    
                     db_agent = Agent(
                         name=agent_data["name"],
                         agent_type=agent_data["agent_type"],
                         system_instruction=agent_data["system_instruction"],
-                        config=agent_data.get("config", {}),
+                        config=agent_config,
                         input_type=agent_data.get("input_type", "text"),
                         output_type=agent_data.get("output_type", "text"),
                         owner_id=current_user_id,
@@ -739,6 +748,13 @@ async def chat_generate_mini_service(
                     db.add(db_agent)
                     db.commit()
                     db.refresh(db_agent)
+                    
+                    # Update RAG agent config with actual agent ID
+                    if agent_data["agent_type"] == "rag":
+                        agent_config["agent_id"] = db_agent.id
+                        db_agent.config = agent_config
+                        db.commit()
+                        db.refresh(db_agent)
                     
                     created_agents.append(db_agent)
                     agent_id_mapping[idx] = db_agent.id
@@ -861,7 +877,7 @@ Respond with ONLY a JSON object in this format:
 {{
     "checklist": {{
         "service_purpose": {{"completed": true/false, "value": "extracted purpose or TBD"}},
-        "input_type": {{"completed": true/false, "value": "text/image/sound or TBD"}},
+        "input_type": {{"completed": true/false, "value": "text/image/sound/document or TBD"}},
         "output_type": {{"completed": true/false, "value": "text/image/sound or TBD"}},
         "service_name": {{"completed": true/false, "value": "extracted name or TBD"}}
     }},
@@ -912,23 +928,35 @@ REQUIREMENTS:
 - Output Type: {requirements_data['checklist']['output_type']['value']}
 - Service Name: {requirements_data['checklist']['service_name']['value']}
 
-AVAILABLE AGENTS:
+AVAILABLE AGENTS AND THEIR REQUIRED CONFIGURATIONS:
 - gemini: General purpose AI (text → text)
+  Config: {{"model": "gemini-1.5-flash", "temperature": 0.7}}
 - edge_tts: Text to speech (text → sound)
+  Config: {{"voice": "en-US-AriaNeural", "rate": 0}}
 - bark_tts: High-quality TTS (text → sound, English only)
+  Config: {{"voice_preset": "v2/en_speaker_6"}}
 - transcribe: Audio to text (sound → text)
+  Config: {{"model": "base"}}
 - gemini_text2image: Create images (text → image)
+  Config: {{"model_name": "gemini-pro-vision"}}
 - internet_research: Web search (text → text)
+  Config: {{"max_results": 5}}
 - document_parser: Extract text (document → text)
+  Config: {{}}
 - google_translate: Translation (text → text)
+  Config: {{"target_language": "es"}} (use proper language code like "es" for Spanish, "fr" for French, "de" for German, etc.)
+- rag: Document Q&A with RAG (text → text)
+  Config: {{"model": "gemini-1.5-flash", "temperature": 0.7, "max_tokens": 1024, "num_results": 5}}
+- custom_endpoint_llm: Custom API endpoint (text → text)
+  Config: {{"endpoint_url": "https://api.example.com/generate"}}
 
-Generate a complete service specification with NO "TBD" values:
+Generate a complete service specification with NO "TBD" values. Use the EXACT config format for each agent type:
 
 {{
     "service": {{
         "name": "exact service name",
         "description": "detailed description",
-        "input_type": "text/image/sound",
+        "input_type": "text/image/sound/document",
         "output_type": "text/image/sound",
         "is_public": false
     }},
@@ -937,7 +965,7 @@ Generate a complete service specification with NO "TBD" values:
             "name": "specific agent name",
             "agent_type": "exact agent type from available list",
             "system_instruction": "detailed system prompt",
-            "config": {{"model": "model_name", "temperature": 0.7}},
+            "config": {{USE_EXACT_CONFIG_FORMAT_FROM_ABOVE}},
             "input_type": "text/image/sound",
             "output_type": "text/image/sound"
         }}
@@ -950,6 +978,13 @@ Generate a complete service specification with NO "TBD" values:
     }},
     "ready_for_approval": true
 }}
+
+IMPORTANT NOTES:
+- For google_translate: Choose target_language based on service purpose. Common codes: "es" (Spanish), "fr" (French), "de" (German), "zh" (Chinese), "ja" (Japanese), "ko" (Korean), "ru" (Russian), "ar" (Arabic), "hi" (Hindi), "pt" (Portuguese), "it" (Italian), "tr" (Turkish)
+- For gemini: Use "gemini-1.5-flash" for general tasks, "gemini-pro" for complex reasoning
+- For rag: Requires pre-uploaded documents for document-based Q&A functionality
+- For custom_endpoint_llm: endpoint_url must be a valid HTTP/HTTPS URL that accepts POST requests
+- Agent workflow: Each agent processes sequentially (0 → 1 → 2 → etc.), last agent has "next": null
 
 CRITICAL: Use specific agent types, no TBD values, workflow starts at node "0", last node has "next": null.
 Respond ONLY with the JSON object.
