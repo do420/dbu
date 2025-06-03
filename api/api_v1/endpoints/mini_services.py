@@ -1,6 +1,7 @@
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
+import json
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -15,7 +16,10 @@ from agents import create_agent
 from agents.multi_agent import WorkflowProcessor
 import logging
 from models.user import User
+from models.api_key import APIKey
 from sqlalchemy.orm.attributes import flag_modified
+import google.generativeai as genai
+from core.security import decrypt_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -627,3 +631,466 @@ async def upload_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save file: {str(e)}"
         )
+
+@router.post("/chat-generate", response_model=Dict[str, Any])
+async def chat_generate_mini_service(
+    chat_request: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Interactive chat with Gemini to generate a new mini service with agents
+    
+    Expected input:
+    {
+        "message": "User's message to Gemini",
+        "conversation_history": [
+            {"role": "user", "content": "previous message"},
+            {"role": "assistant", "content": "previous response"}
+        ],
+        "create_service": false,  # Set to true when ready to create the service
+        "gemini_api_key": "Optional Gemini API key"
+    }
+    """
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    message = chat_request.get("message")
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message is required"
+        )
+    
+    conversation_history = chat_request.get("conversation_history", [])
+    create_service = chat_request.get("create_service", False)
+    
+    # Get Gemini API key
+    gemini_api_key = chat_request.get("gemini_api_key")
+    if not gemini_api_key:
+        # Try to get from user's stored API keys
+        user = db.query(User).filter(User.id == current_user_id).first()
+        if user and user.api_keys:
+            # Find the Gemini API key from the user's stored API keys
+            for api_key_obj in user.api_keys:
+                if api_key_obj.provider.lower() == "gemini":
+                    # Decrypt the stored API key
+                    gemini_api_key = decrypt_api_key(api_key_obj.api_key)
+                    break
+    
+    if not gemini_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Gemini API key is required. Please provide it in the request or save it in your profile."
+        )
+    
+    try:
+        # Configure Gemini
+        genai.configure(api_key=gemini_api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Build conversation context
+        conversation_text = ""
+        for msg in conversation_history:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            conversation_text += f"{role}: {msg['content']}\n"
+        
+        if create_service:
+            # User wants to create the service - ask Gemini to generate the final specification
+            system_prompt = f"""
+Based on our conversation, please generate a complete mini-service specification. The user has confirmed they want to create the service.
+
+Previous conversation:
+{conversation_text}
+
+Current user message: {message}
+
+Please respond with a JSON object in the following exact format:
+
+{{
+    "service": {{
+        "name": "Generated service name",
+        "description": "Detailed description of what this service does",
+        "input_type": "text|image|sound",
+        "output_type": "text|image|sound",
+        "is_public": false
+    }},
+    "agents": [
+        {{
+            "name": "Agent Name",
+            "agent_type": "gemini|openai|claude|edge_tts|bark_tts|transcribe|gemini_text2image|internet_research|document_parser|google_translate",
+            "system_instruction": "Detailed system prompt for the agent",
+            "config": {{
+                "model": "model_name_if_needed",
+                "temperature": 0.7,
+                "max_tokens": 1000
+            }},
+            "input_type": "text|image|sound",
+            "output_type": "text|image|sound"
+        }}
+    ],
+    "workflow": {{
+        "nodes": {{
+            "0": {{
+                "agent_id": 0,
+                "next": 1
+            }},
+            "1": {{
+                "agent_id": 1,
+                "next": null
+            }}
+        }}
+    }}
+}}
+
+CRITICAL REQUIREMENTS:
+- Always start workflow with node "0"
+- agent_id in workflow should correspond to the index of agents in the agents array (0, 1, 2...)
+- Use appropriate agent types from the available list
+- For gemini agents, use model names like "gemini-pro", "gemini-pro-vision"
+- For openai agents, use models like "gpt-3.5-turbo", "gpt-4"
+- Make system instructions specific and detailed
+- Ensure the workflow makes logical sense
+- The last node should have "next": null
+- Keep agent configs realistic and appropriate
+- input_type/output_type must be "text", "image", or "sound" (not "file" or "audio")
+- Each agent must have ALL required fields: name, agent_type, system_instruction, config, input_type, output_type
+
+Respond ONLY with the JSON object, no other text. Do not wrap the JSON in markdown code blocks.
+"""
+            
+            response = model.generate_content(system_prompt)
+            response_text = response.text.strip()
+            
+            # Remove markdown code block formatting if present
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]  # Remove ```json
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]  # Remove ```
+            response_text = response_text.strip()
+            
+            # Try to parse as JSON (service creation)
+            try:
+                generated_data = json.loads(response_text)
+                
+                # Validate the structure
+                if not all(key in generated_data for key in ["service", "agents", "workflow"]):
+                    raise ValueError("Invalid response structure")
+                
+                # Create agents first
+                created_agents = []
+                agent_id_mapping = {}
+                
+                for idx, agent_data in enumerate(generated_data["agents"]):
+                    db_agent = Agent(
+                        name=agent_data["name"],
+                        agent_type=agent_data["agent_type"],
+                        system_instruction=agent_data["system_instruction"],
+                        config=agent_data.get("config", {}),
+                        input_type=agent_data.get("input_type", "text"),
+                        output_type=agent_data.get("output_type", "text"),
+                        owner_id=current_user_id,
+                        is_enhanced=False
+                    )
+                    
+                    db.add(db_agent)
+                    db.commit()
+                    db.refresh(db_agent)
+                    
+                    created_agents.append(db_agent)
+                    agent_id_mapping[idx] = db_agent.id
+                
+                # Update workflow with actual agent IDs
+                updated_workflow = {"nodes": {}}
+                for node_id, node_data in generated_data["workflow"]["nodes"].items():
+                    array_index = node_data["agent_id"]
+                    actual_agent_id = agent_id_mapping[array_index]
+                    
+                    updated_workflow["nodes"][str(node_id)] = {
+                        "agent_id": actual_agent_id,
+                        "next": node_data["next"]
+                    }
+                
+                # Check if any agent is enhanced
+                is_enhanced = any(agent.is_enhanced for agent in created_agents)
+                
+                # Create the mini service
+                service_data = generated_data["service"]
+                
+                db_mini_service = MiniService(
+                    name=service_data["name"],
+                    description=service_data["description"],
+                    workflow=updated_workflow,
+                    input_type=service_data.get("input_type", "text"),
+                    output_type=service_data.get("output_type", "text"),
+                    owner_id=current_user_id,
+                    average_token_usage={},
+                    run_time=0,
+                    is_enhanced=is_enhanced,
+                    is_public=service_data.get("is_public", False)
+                )
+                
+                db.add(db_mini_service)
+                db.commit()
+                db.refresh(db_mini_service)
+                
+                # Log the creation
+                create_log(
+                    db=db,
+                    user_id=current_user_id,
+                    log_type=0,
+                    description=f"Generated mini-service '{service_data['name']}' with {len(created_agents)} agents using AI chat"
+                )
+                
+                return {
+                    "type": "service_created",
+                    "mini_service": {
+                        "id": db_mini_service.id,
+                        "name": db_mini_service.name,
+                        "description": db_mini_service.description,
+                        "workflow": db_mini_service.workflow,
+                        "input_type": db_mini_service.input_type,
+                        "output_type": db_mini_service.output_type,
+                        "owner_id": db_mini_service.owner_id,
+                        "created_at": db_mini_service.created_at.isoformat(),
+                        "is_enhanced": db_mini_service.is_enhanced,
+                        "is_public": db_mini_service.is_public
+                    },
+                    "agents": [
+                        {
+                            "id": agent.id,
+                            "name": agent.name,
+                            "agent_type": agent.agent_type,
+                            "system_instruction": agent.system_instruction,
+                            "config": agent.config,
+                            "input_type": agent.input_type,
+                            "output_type": agent.output_type,
+                            "owner_id": agent.owner_id,
+                            "created_at": agent.created_at.isoformat(),
+                            "is_enhanced": agent.is_enhanced
+                        } for agent in created_agents
+                    ],
+                    "message": f"Successfully created mini-service '{service_data['name']}' with {len(created_agents)} agents!",
+                    "conversation_history": conversation_history + [
+                        {"role": "user", "content": message},
+                        {"role": "assistant", "content": f"Perfect! I've created your mini-service '{service_data['name']}' with {len(created_agents)} specialized agents. The service is now ready to use!"}
+                    ]
+                }
+                
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                logger.error(f"Failed to parse service creation response: {response_text}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create service. Please try rephrasing your request."
+                )
+        
+        else:
+            # Regular conversation - help user design the service and evaluate completeness
+            system_prompt = f"""
+You are a friendly AI assistant helping users create custom mini-services. Your job is to guide them through the process step by step using a systematic checklist approach.
+
+CONVERSATION STYLE:
+- Be conversational and friendly
+- Ask ONE question at a time
+- Keep responses short (2-3 sentences max)
+- Avoid technical jargon
+- Show progress by mentioning what's been determined and what's still needed
+
+SERVICE CREATION CHECKLIST:
+Review the conversation and check off completed items:
+
+☐ SERVICE PURPOSE: What specific task will this service accomplish?
+☐ INPUT TYPE: What will the user provide? (text, image, or sound)
+☐ OUTPUT TYPE: What should the service return? (text, image, or sound)
+☐ SERVICE NAME: A simple, clear name for the service
+☐ AGENT SELECTION: Which agents are needed to accomplish the task?
+
+AVAILABLE AGENTS (you choose based on their needs):
+- gemini: General purpose AI text generation and analysis (text → text)
+- openai: Advanced text generation (text → text) 
+- claude: Text analysis and reasoning (text → text)
+- edge_tts: Convert text to speech (text → sound)
+- bark_tts: High-quality text to speech (text → sound)
+- transcribe: Convert audio to text (sound → text)
+- gemini_text2image: Create images from descriptions (text → image)
+- internet_research: Search the web for information (text → text)
+- document_parser: Extract text from documents (document → text)
+- google_translate: Translate between languages (text → text)
+
+Previous conversation:
+{conversation_text}
+
+Current user message: {message}
+
+INSTRUCTIONS:
+1. First, mentally review the checklist based on the conversation history
+2. If ALL 5 checklist items are complete (✓), automatically create the service by responding ONLY with "CREATE_SERVICE:" + JSON
+3. If any items are missing, ask ONE friendly question to gather the next missing piece of information
+4. When asking questions, briefly mention what you already know to show progress
+5. Do not use any agents besides the ones listed above
+6. If the requested service cannot be created with available agents, politely explain why and suggest alternatives
+
+EXAMPLE RESPONSES WHEN GATHERING INFO:
+- "Great! I understand you want to [PURPOSE]. What type of input will you provide - text, image, or audio?"
+- "Perfect! So far I know: [PURPOSE] with [INPUT_TYPE] input. What would you like to get back - text, image, or audio?"
+- "Excellent! I have: [PURPOSE], [INPUT_TYPE] → [OUTPUT_TYPE]. What would you like to name this service?"
+
+When creating service, use this exact format:
+CREATE_SERVICE: {{"service": {{"name": "Service Name", "description": "What it does", "input_type": "text|image|sound", "output_type": "text|image|sound", "is_public": false}}, "agents": [{{"name": "Tool Name", "agent_type": "tool_type", "system_instruction": "What this tool should do", "config": {{"temperature": 0.7, "model": "gemini-1.5-flash"}}, "input_type": "text|image|sound", "output_type": "text|image|sound"}}], "workflow": {{"nodes": {{"0": {{"agent_id": 0, "next": null}}}}}}}}
+"""
+            
+            response = model.generate_content(system_prompt)
+            response_text = response.text.strip()
+            
+            # Check if Gemini decided to create the service
+            if response_text.startswith("CREATE_SERVICE:"):
+                json_text = response_text[15:].strip()  # Remove "CREATE_SERVICE:" prefix
+                
+                # Remove markdown code block formatting if present
+                if json_text.startswith("```json"):
+                    json_text = json_text[7:]  # Remove ```json
+                if json_text.endswith("```"):
+                    json_text = json_text[:-3]  # Remove ```
+                json_text = json_text.strip()
+                
+                try:
+                    generated_data = json.loads(json_text)
+                    
+                    # Validate the structure
+                    if not all(key in generated_data for key in ["service", "agents", "workflow"]):
+                        raise ValueError("Invalid response structure")
+                    
+                    # Create agents first
+                    created_agents = []
+                    agent_id_mapping = {}
+                    
+                    for idx, agent_data in enumerate(generated_data["agents"]):
+                        db_agent = Agent(
+                            name=agent_data["name"],
+                            agent_type=agent_data["agent_type"],
+                            system_instruction=agent_data["system_instruction"],
+                            config=agent_data.get("config", {}),
+                            input_type=agent_data.get("input_type", "text"),
+                            output_type=agent_data.get("output_type", "text"),
+                            owner_id=current_user_id,
+                            is_enhanced=False
+                        )
+                        
+                        db.add(db_agent)
+                        db.commit()
+                        db.refresh(db_agent)
+                        
+                        created_agents.append(db_agent)
+                        agent_id_mapping[idx] = db_agent.id
+                    
+                    # Update workflow with actual agent IDs
+                    updated_workflow = {"nodes": {}}
+                    for node_id, node_data in generated_data["workflow"]["nodes"].items():
+                        array_index = node_data["agent_id"]
+                        actual_agent_id = agent_id_mapping[array_index]
+                        
+                        updated_workflow["nodes"][str(node_id)] = {
+                            "agent_id": actual_agent_id,
+                            "next": node_data["next"]
+                        }
+                    
+                    # Check if any agent is enhanced
+                    is_enhanced = any(agent.is_enhanced for agent in created_agents)
+                    
+                    # Create the mini service
+                    service_data = generated_data["service"]
+                    
+                    db_mini_service = MiniService(
+                        name=service_data["name"],
+                        description=service_data["description"],
+                        workflow=updated_workflow,
+                        input_type=service_data.get("input_type", "text"),
+                        output_type=service_data.get("output_type", "text"),
+                        owner_id=current_user_id,
+                        average_token_usage={},
+                        run_time=0,
+                        is_enhanced=is_enhanced,
+                        is_public=service_data.get("is_public", False)
+                    )
+                    
+                    db.add(db_mini_service)
+                    db.commit()
+                    db.refresh(db_mini_service)
+                    
+                    # Log the creation
+                    create_log(
+                        db=db,
+                        user_id=current_user_id,
+                        log_type=0,
+                        description=f"AI auto-generated mini-service '{service_data['name']}' with {len(created_agents)} agents"
+                    )
+                    
+                    return {
+                        "type": "service_created",
+                        "mini_service": {
+                            "id": db_mini_service.id,
+                            "name": db_mini_service.name,
+                            "description": db_mini_service.description,
+                            "workflow": db_mini_service.workflow,
+                            "input_type": db_mini_service.input_type,
+                            "output_type": db_mini_service.output_type,
+                            "owner_id": db_mini_service.owner_id,
+                            "created_at": db_mini_service.created_at.isoformat(),
+                            "is_enhanced": db_mini_service.is_enhanced,
+                            "is_public": db_mini_service.is_public
+                        },
+                        "agents": [
+                            {
+                                "id": agent.id,
+                                "name": agent.name,
+                                "agent_type": agent.agent_type,
+                                "system_instruction": agent.system_instruction,
+                                "config": agent.config,
+                                "input_type": agent.input_type,
+                                "output_type": agent.output_type,
+                                "owner_id": agent.owner_id,
+                                "created_at": agent.created_at.isoformat(),
+                                "is_enhanced": agent.is_enhanced
+                            } for agent in created_agents
+                        ],
+                        "message": f"🎉 Great! I've automatically created your mini-service '{service_data['name']}' with {len(created_agents)} specialized agents. All requirements were satisfied and the service is ready to use!",
+                        "conversation_history": conversation_history + [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": f"Perfect! I've analyzed our conversation and determined that all requirements are satisfied. I've automatically created your mini-service '{service_data['name']}' with {len(created_agents)} specialized agents. The service is now ready to use!"}
+                        ]
+                    }
+                    
+                except (json.JSONDecodeError, ValueError, KeyError) as e:
+                    logger.error(f"Failed to parse auto-generated service: {json_text}")
+                    # Fall back to regular conversation if JSON parsing fails
+                    return {
+                        "type": "chat_response",
+                        "message": "I think we have enough information to create your service, but let me ask a few more clarifying questions to make sure everything is perfect.",
+                        "conversation_history": conversation_history + [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": "I think we have enough information to create your service, but let me ask a few more clarifying questions to make sure everything is perfect."}
+                        ]
+                    }
+            
+            else:
+                # Regular conversation response
+                return {
+                    "type": "chat_response",
+                    "message": response_text,
+                    "conversation_history": conversation_history + [
+                        {"role": "user", "content": message},
+                        {"role": "assistant", "content": response_text}
+                    ]
+                }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in chat generation: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chat generation failed: {str(e)}"
+        )
+               
