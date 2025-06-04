@@ -17,3 +17,4 @@ class Agent(Base):
     is_enhanced = Column(Boolean, default=False)    # Relationship
     owner = relationship("User", back_populates="agents")
     favorite_agents = relationship("FavoriteAgent", back_populates="agent")
+    visible = Column(Integer, default=1)  # 0: hidden, 1: visible
