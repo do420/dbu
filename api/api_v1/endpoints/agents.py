@@ -184,7 +184,8 @@ async def create_agent_endpoint(
             input_type=input_type,
             output_type=output_type,
             owner_id=current_user_id,
-            is_enhanced=False
+            is_enhanced=False,
+            visible=1  # Default to visible
         )
         db.add(db_agent)
         db.commit()
@@ -286,7 +287,9 @@ async def create_agent_endpoint(
         input_type=input_type,
         output_type=output_type,
         owner_id=current_user_id,
-        is_enhanced=is_enhanced
+        is_enhanced=is_enhanced,
+        visible=1  # Default to visible
+
     )
     create_log(
         db=db,
@@ -306,27 +309,55 @@ async def list_agents(
     db: Session = Depends(get_db),
     current_user_id: int = None  # Replace with actual user ID from authentication
 ):
-    """List all agents owned by the current user"""
-    #if current_user_id is None:
-    #    raise HTTPException(
-    #        status_code=status.HTTP_401_UNAUTHORIZED,
-    #        detail="current_user_id parameter is required"
-    #    )
-    #.filter(
-    #    Agent.owner_id == current_user_id
-    #)
+    """List all agents owned by the current user and visible agents only"""
+    # Only include agents where visible == 1
     if current_user_id is not None:
-        # For RAG agents, only return those owned by the current user
-        # For other agent types, return all
         agents = db.query(Agent).filter(
-            (Agent.agent_type != "rag") | 
-            ((Agent.agent_type == "rag") & (Agent.owner_id == current_user_id))
+            (Agent.visible == 1) &
+            (
+                (Agent.agent_type != "rag") | 
+                ((Agent.agent_type == "rag") & (Agent.owner_id == current_user_id))
+            )
         ).offset(skip).limit(limit).all()
-    else:        # If no user ID provided, only return non-RAG agents
+    else:
         agents = db.query(Agent).filter(
-            Agent.agent_type != "rag"
+            (Agent.visible == 1) &
+            (Agent.agent_type != "rag")
         ).offset(skip).limit(limit).all()
     return agents
+
+
+
+@router.post("/{agent_id}/hide", response_model=AgentInDB)
+async def hide_agent(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Set the agent's visible field to -1 (hide the agent)"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    db_agent = db.query(Agent).filter(
+        Agent.id == agent_id,
+        Agent.owner_id == current_user_id
+    ).first()
+    if not db_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent with ID {agent_id} not found"
+        )
+    db_agent.visible = -1
+    db.commit()
+    db.refresh(db_agent)
+    return db_agent
+
+
+
+
+
 
 @router.get("/favorites", response_model=List[AgentInDB])
 async def get_favorite_agents(

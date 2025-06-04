@@ -1,10 +1,11 @@
 import google.generativeai as genai
 from typing import Dict, Any, List
 from .base import BaseAgent
+from core.pricing_utils import pricing_calculator
 import logging
 from PIL import Image
 import io
-import base64 # Import the base64 module
+import base64
 logger = logging.getLogger(__name__)
 
 class GeminiImageGeneration(BaseAgent):
@@ -38,28 +39,38 @@ class GeminiImageGeneration(BaseAgent):
                 image_base64 = base64.b64encode(image_bytes.read()).decode("utf-8")
 
                 logger.debug(f"GeminiImageGeneration generated an image.")
-                return {
+                result = {
                     "output": image_base64, # Return as base64 encoded string
                     "raw_response": str(response),
                     "agent_type": "gemini-image",
-                    "mime_type": "image/png"
+                    "mime_type": "image/png",
+                    "token_usage": {"total_tokens": 0}
                 }
+                model_name = self.config.get("model_name", "gemini-pro-vision")
+                result = pricing_calculator.add_pricing_to_response(result, model_name)
+                return result
             else:
                 logger.warning(f"GeminiImageGeneration did not return image data. Response: {response}")
-                return {
+                result = {
                     "output": "Error: No image data received from Gemini.",
                     "error": "No image data in response",
                     "raw_response": str(response),
                     "agent_type": "gemini-image",
                     "token_usage": {"total_tokens": 0} # No clear token usage for image generation
                 }
+                model_name = self.config.get("model_name", "gemini-pro-vision")
+                result = pricing_calculator.add_pricing_to_response(result, model_name)
+                return result
 
         except Exception as e:
             logger.error(f"Error with Gemini Image Generation API: {str(e)}")
-            return {
+            result = {
                 "output": f"Error with Gemini Image Generation API: {str(e)}",
                 "error": str(e),
                 "agent_type": "gemini-image",
                 "token_usage": {"total_tokens": 0}
             }
+            model_name = self.config.get("model_name", "gemini-pro-vision")
+            result = pricing_calculator.add_pricing_to_response(result, model_name)
+            return result
 

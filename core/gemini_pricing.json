@@ -1,0 +1,247 @@
+{
+  "models": [
+    {
+      "name": "gemini-2.5-flash",
+      "input_price": {
+        "free": "Free",
+        "paid": {
+          "text_image_video": 0.15,
+          "audio": 1.00
+        }
+      },
+      "output_price": {
+        "free": "Free",
+        "paid": {
+          "non_thoughtful": 0.60,
+          "thoughtful": 3.50
+        }
+      },
+      "context_caching_price": {
+        "free": "Unavailable",
+        "paid": {
+          "text_image_video": 0.0375,
+          "audio": 0.25,
+          "per_hour_million_tokens": 1.00
+        }
+      },
+      "grounding_with_google_search": {
+        "free": "Up to 500 RPD",
+        "paid": "1,500 RPD free, then $35 per 1,000 requests"
+      },
+      "text_to_speech": {
+        "free": "Free",
+        "paid": {
+          "input": 0.50,
+          "output": 10.00
+        }
+      },
+      "used_to_improve_products": {
+        "free": true,
+        "paid": false
+      }
+    },
+    {
+      "name": "gemini-2.5-pro",
+      "input_price": {
+        "free": "Unavailable",
+        "paid": {
+          "under_200k_tokens": 1.25,
+          "over_200k_tokens": 2.50
+        }
+      },
+      "output_price": {
+        "free": "Unavailable",
+        "paid": {
+          "under_200k_tokens": 10.00,
+          "over_200k_tokens": 15.00
+        }
+      },
+      "context_caching_price": {
+        "free": "Unavailable",
+        "paid": {
+          "under_200k_tokens": 0.31,
+          "over_200k_tokens": 0.625,
+          "per_hour_million_tokens": 4.50
+        }
+      },
+      "grounding_with_google_search": {
+        "free": "Unavailable",
+        "paid": "1,500 RPD free, then $35 per 1,000 requests"
+      },
+      "text_to_speech": {
+        "free": "Free",
+        "paid": {
+          "input": 1.00,
+          "output": 20.00
+        }
+      },
+      "used_to_improve_products": {
+        "free": true,
+        "paid": false
+      }
+    },
+    {
+      "name": "gemini-2.0-flash",
+      "input_price": {
+        "free": "Free",
+        "paid": {
+          "text_image_video": 0.10,
+          "audio": 0.70
+        }
+      },
+      "output_price": {
+        "free": "Free",
+        "paid": 0.40
+      },
+      "context_caching_price": {
+        "free": "Free",
+        "paid": {
+          "text_image_video": 0.025,
+          "audio": 0.175
+        }
+      },
+      "context_cache_storage": {
+        "free": "Up to 1M tokens per hour free",
+        "paid": "1.00 per hour per million tokens"
+      },
+      "image_generation_price": {
+        "free": "Free",
+        "paid": 0.039
+      },
+      "fine_tuning_price": "Unavailable",
+      "grounding_with_google_search": {
+        "free": "Up to 500 RPD",
+        "paid": "1,500 RPD free, then $35 per 1,000 requests"
+      },
+      "live_api": {
+        "free": "Free",
+        "paid": {
+          "input": {
+            "text": 0.35,
+            "audio_image_video": 2.10
+          },
+          "output": {
+            "text": 1.50,
+            "audio": 8.50
+          }
+        }
+      },
+      "used_to_improve_products": {
+        "free": true,
+        "paid": false
+      }
+    },
+    {
+      "name": "gemini-2.0-flash-lite",
+      "input_price": {
+        "free": "Free",
+        "paid": 0.075
+      },
+      "output_price": {
+        "free": "Free",
+        "paid": 0.30
+      },
+      "context_caching_price": "Unavailable",
+      "context_cache_storage": "Unavailable",
+      "fine_tuning_price": "Unavailable",
+      "grounding_with_google_search": "Unavailable",
+      "used_to_improve_products": {
+        "free": true,
+        "paid": false
+      }
+    },
+    {
+      "name": "imagen-3",
+      "image_price": {
+        "free": "Unavailable",
+        "paid": 0.03
+      },
+      "used_to_improve_products": {
+        "free": true,
+        "paid": false
+      }
+    },
+    {
+      "name": "gemma-3",
+      "input_price": {
+        "free": "Free",
+        "paid": "Unavailable"
+      },
+      "output_price": {
+        "free": "Free",
+        "paid": "Unavailable"
+      },
+      "context_caching_price": {
+        "free": "Free",
+        "paid": "Unavailable"
+      },
+      "context_cache_storage": {
+        "free": "Free",
+        "paid": "Unavailable"
+      },
+      "fine_tuning_price": "Unavailable",
+      "grounding_with_google_search": "Unavailable",
+      "used_to_improve_products": {
+        "free": true,
+        "paid": false
+      }
+    },
+    {
+      "name": "gemma-3n",
+      "input_price": {
+        "free": "Free",
+        "paid": "Unavailable"
+      },
+      "output_price": {
+        "free": "Free",
+        "paid": "Unavailable"
+      },
+      "context_caching_price": {
+        "free": "Free",
+        "paid": "Unavailable"
+      },
+      "context_cache_storage": {
+        "free": "Free",
+        "paid": "Unavailable"
+      },
+      "fine_tuning_price": "Unavailable",
+      "grounding_with_google_search": "Unavailable",
+      "used_to_improve_products": {
+        "free": true,
+        "paid": false
+      }
+    },
+    {
+      "name": "gemini-1.5-flash",
+      "input_price": {
+        "free": "Free",
+        "paid": {
+          "under_128k_tokens": 0.075,
+          "over_128k_tokens": 0.15
+        }
+      },
+      "output_price": {
+        "free": "Free",
+        "paid": {
+          "under_128k_tokens": 0.30,
+          "over_128k_tokens": 0.60
+        }
+      },
+      "context_caching_price": {
+        "free": "Up to 1M tokens/hour free",
+        "paid": {
+          "under_128k_tokens": 0.01875,
+          "over_128k_tokens": 0.0375
+        }
+      },
+      "context_cache_storage": {
+        "free": "Free",
+        "paid": "1.00 per hour"
+      },
+      "fine_tuning_price": {
+        "free": "Same token pricing; tuning service is free",
+        "paid": "Same token pricing; tuning service is free"
+      }
+    }
+  ]
+}

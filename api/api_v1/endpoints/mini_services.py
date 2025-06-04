@@ -20,6 +20,7 @@ from models.api_key import APIKey
 from sqlalchemy.orm.attributes import flag_modified
 import google.generativeai as genai
 from core.security import decrypt_api_key
+from core.pricing_utils import pricing_calculator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -270,12 +271,30 @@ async def run_mini_service(
         
         # Run the workflow
         result = await workflow_processor.process(input_value, context)
-        
+        model_name = None
+        for agent in agents.values():
+            if hasattr(agent, 'config') and 'model_name' in agent.config:
+                model_name = agent.config['model_name']
+                break
+        if not model_name:
+            model_name = "gemini-1.5-flash"
         # Update the process record with token usage
         token_usage = result.get("token_usage", {"total_tokens": 0})
-        process.total_tokens = token_usage
+        # Add pricing to token_usage for process
+        if token_usage:
+            token_usage_with_pricing = token_usage.copy()
+            token_usage_with_pricing["pricing"] = pricing_calculator.add_pricing_to_response({"token_usage": token_usage}, model_name).get("pricing")
+            process.total_tokens = token_usage_with_pricing
+        else:
+            process.total_tokens = token_usage
+        # Add pricing info to result
+        # Try to get model name from agent config if possible, fallback to mini_service name
         
-        # Update mini service stats
+
+        print(f"Result before pricing: {result}")
+        result = pricing_calculator.add_pricing_to_response(result, model_name)
+        print(f"Result after pricing: {result}")
+        # Update mini_service stats
         mini_service.run_time += 1
         
         # Update average token usage
@@ -287,6 +306,11 @@ async def run_mini_service(
                 )
             else:
                 mini_service.average_token_usage[key] = value
+        # Add pricing to average_token_usage
+        if mini_service.average_token_usage:
+            # Use the same model_name logic as above
+            avg_pricing = pricing_calculator.add_pricing_to_response({"token_usage": mini_service.average_token_usage}, model_name).get("pricing")
+            mini_service.average_token_usage["avg_pricing"] = avg_pricing
         flag_modified(mini_service, "average_token_usage")
         
         # Add process_id to the result for easy reference
@@ -378,6 +402,21 @@ async def list_mini_services(
             # Only TTS/transcribe agents, show token usage as "-"
             mini_service_dict["average_token_usage"] = {key: "-" for key in mini_service_dict.get("average_token_usage", {})}
         # else: leave as is (JSON/dict)
+
+        # Attach pricing info to average_token_usage if present
+        if mini_service_dict.get("average_token_usage"):
+            # Try to get model name from workflow or fallback to mini_service name
+            model_name = None
+            workflow = mini_service_dict.get("workflow", {})
+            for node in workflow.get("nodes", {}).values():
+                if "model_name" in node:
+                    model_name = node["model_name"]
+                    break
+            if not model_name:
+                model_name = mini_service_dict.get("name")
+            fake_response = {"token_usage": mini_service_dict["average_token_usage"]}
+            pricing = pricing_calculator.add_pricing_to_response(fake_response, model_name).get("pricing")
+            mini_service_dict["average_pricing"] = pricing
 
         result.append(mini_service_dict)
     
@@ -1094,6 +1133,6 @@ Respond with ONLY a JSON object:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat generation failed: {str(e)}"
         )
-               
+
 
 

@@ -8,6 +8,7 @@ from models.mini_service import MiniService
 from schemas.process import ProcessInDB
 from models.log import Log
 from schemas.log import LogInDB
+from core.pricing_utils import pricing_calculator
 
 router = APIRouter()
 
@@ -43,7 +44,7 @@ async def list_processes(
     # Convert the result to the expected format
     processes = []
     for row in query_result:
-        process = row[0]  # The Process object
+        process = row[0]
         process_dict = {
             "id": process.id,
             "mini_service_id": process.mini_service_id,
@@ -56,6 +57,11 @@ async def list_processes(
             "mini_service_output_type": row[4],
             "mini_service_is_enhanced": row[5]
         }
+        # Attach pricing info
+        model_name = process_dict.get("mini_service_name")
+        fake_response = {"token_usage": process_dict["total_tokens"]}
+        pricing = pricing_calculator.add_pricing_to_response(fake_response, model_name).get("pricing")
+        process_dict["pricing"] = pricing
         processes.append(ProcessInDB(**process_dict))
     
     return processes
@@ -124,7 +130,7 @@ async def get_process(
         )
     
     # Convert the result to the expected format
-    process = query_result[0]  # The Process object
+    process = query_result[0]
     process_dict = {
         "id": process.id,
         "mini_service_id": process.mini_service_id,
@@ -137,7 +143,11 @@ async def get_process(
         "mini_service_output_type": query_result[4],
         "mini_service_is_enhanced": query_result[5]
     }
-    
+    # Attach pricing info
+    model_name = process_dict.get("mini_service_name")
+    fake_response = {"token_usage": process_dict["total_tokens"]}
+    pricing = pricing_calculator.add_pricing_to_response(fake_response, model_name).get("pricing")
+    process_dict["pricing"] = pricing
     return ProcessInDB(**process_dict)
 
 
