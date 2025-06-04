@@ -174,8 +174,29 @@ async def create_agent_endpoint(
                 detail="Gemini API key is required for RAG agents but not found in your account."
             )
         gemini_api_key = decrypt_api_key(gemini_api_key_obj.api_key)
+
+        # Create agent in database first to get the agent_id
+        db_agent = Agent(
+            name=name,
+            system_instruction=system_instruction,
+            agent_type=agent_type,
+            config=config,
+            input_type=input_type,
+            output_type=output_type,
+            owner_id=current_user_id,
+            is_enhanced=False
+        )
+        db.add(db_agent)
+        db.commit()
+        db.refresh(db_agent)
+
+        config['agent_id'] = db_agent.id
+        db_agent.config = config
+        db.commit()
+        db.refresh(db_agent)
+
         # Prepare ChromaDB dir
-        chroma_dir = os.path.join("db", "chroma", f"rag_collection_{name}")
+        chroma_dir = os.path.join("db", "chroma", str(db_agent.id))
         os.makedirs(chroma_dir, exist_ok=True)
         # Save PDF
         pdf_path = os.path.join(chroma_dir, file.filename)
@@ -191,12 +212,24 @@ async def create_agent_endpoint(
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         chunks = text_splitter.split_documents(documents)
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=gemini_api_key)
+        # Use the exact same collection name that RAGAgent expects
+        collection_name = f"rag_collection_{db_agent.id}"
         chroma_db = Chroma.from_documents(
             documents=chunks,
             embedding=embeddings,
-            persist_directory=chroma_dir
+            persist_directory=chroma_dir,
+            collection_name=collection_name
         )
         _ = chroma_db.similarity_search("test", k=1)
+
+        create_log(
+            db=db,
+            user_id=current_user_id,
+            log_type=1,
+            description=f"Created RAG agent '{name}' with ChromaDB collection"
+        )
+        
+        return db_agent
     # --- ENHANCE SYSTEM PROMPT FEATURE (unchanged) ---
     enhanced_prompt = system_instruction
     is_enhanced = False

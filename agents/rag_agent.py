@@ -98,10 +98,17 @@ class RAGAgent(BaseAgent):
         self.chunk_size = int(config.get('chunk_size', 1024))
         self.chunk_overlap = int(config.get('chunk_overlap', 128))
         self.num_results = int(config.get('num_results', 5))
+
+        agent_id = config.get('agent_id')
+        if not agent_id:
+            raise ValueError("agent_id is required for RAGAgent")
+
         # Persistent ChromaDB path per agent
-        self.collection_name = config.get('collection_name', f"rag_collection_{config.get('agent_id', 'default')}")
-        self.collection_path = config.get('collection_path', os.path.abspath(f"db/chroma/{self.collection_name}"))
+        self.collection_name = f"rag_collection_{agent_id}"
+        
+        self.collection_path = os.path.join("db", "chroma", str(agent_id))
         os.makedirs(self.collection_path, exist_ok=True)
+        print(f"Using ChromaDB collection path: {self.collection_path}", flush=True)
         # Embedding function
         self.embedding_function = GeminiEmbeddingFunction(
             api_key=self.api_key,
@@ -109,18 +116,46 @@ class RAGAgent(BaseAgent):
         )
         # Persistent ChromaDB client
         self.chroma_client = chromadb.PersistentClient(path=self.collection_path)
+
+
+        print(f"All collections in {self.collection_path}:", flush=True)
+        try:
+            all_collections = self.chroma_client.list_collections()
+            for col in all_collections:
+                print(f"  - Collection: {col.name}, Count: {col.count()}", flush=True)
+        except Exception as e:
+            print(f"Error listing collections: {e}", flush=True)
+
         # Create or get collection
         try:
             self.collection = self.chroma_client.get_collection(
                 name=self.collection_name,
                 embedding_function=self.embedding_function
             )
-        except Exception:
-            self.collection = self.chroma_client.create_collection(
-                name=self.collection_name,
-                embedding_function=self.embedding_function,
-                metadata={"description": "RAG document collection"}
-            )
+            print(f"Using existing ChromaDB collection: {self.collection_name}", flush=True)
+            print(f"Collection metadata: {self.collection.get_metadata()}", flush=True)
+        except Exception as e:
+            print(f"Failed to get collection '{self.collection_name}': {str(e)}", flush=True)
+            # Try to get collection without embedding function first
+            try:
+                self.collection = self.chroma_client.get_collection(name=self.collection_name)
+                print(f"Got existing collection without embedding function: {self.collection_name}", flush=True)
+            except Exception:
+                # Collection truly doesn't exist, create it
+                print(f"Collection '{self.collection_name}' does not exist, creating new one...", flush=True)
+                try:
+                    self.collection = self.chroma_client.create_collection(
+                        name=self.collection_name,
+                        embedding_function=self.embedding_function,
+                        metadata={"description": "RAG document collection"}
+                    )
+                except Exception as create_error:
+                    # Handle case where collection exists but with different config
+                    if "already exists" in str(create_error).lower():
+                        print(f"Collection exists but with different config, getting existing one...", flush=True)
+                        self.collection = self.chroma_client.get_collection(name=self.collection_name)
+                    else:
+                        raise create_error
         
         # Generate safety settings
         safety_settings = [
@@ -225,92 +260,28 @@ class RAGAgent(BaseAgent):
         
         return pages
     
-    def _document_already_processed(self, filename: str) -> bool:
-        """Check if a document has already been processed and exists in ChromaDB
-        
-        This helps avoid re-processing documents that have already been loaded,
-        saving both time and memory.
-        
-        Args:
-            filename: The filename to check
-            
-        Returns:
-            True if the document already exists in the collection, False otherwise
-        """
-        try:
-            # Query for documents with matching filename metadata
-            results = self.collection.get(
-                where={"filename": filename},
-                limit=1  # We only need to know if any exist
-            )
-            
-            # Check if we got any results back
-            return bool(results and results.get("ids") and len(results["ids"]) > 0)
-            
-        except Exception as e:
-            # Log the error but assume the document hasn't been processed
-            logger.error(f"Error checking if document exists: {str(e)}")
-            return False
+  
+   
 
-    async def process_document(self, document_content: bytes, filename: str) -> Dict[str, Any]:
-        # Only process if not already in ChromaDB
-        if self._document_already_processed(filename):
-            return {"status": "success", "document": {"filename": filename, "already_processed": True}}
-        pdf_path = os.path.join(self.collection_path, filename)
-        with open(pdf_path, 'wb') as f:
-            f.write(document_content)
-            f.flush()
+    async def process(self, input_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        print(f"RAGAgent processing input: {input_text}", flush=True)
+        context = context or {}
+        print(context, flush=True)
+        
+        # Ensure we're using the correct collection for this agent
         try:
-            doc_id = str(uuid.uuid4())
-            total_chunks = 0
-            # Use a much smaller chunk size for less RAM
-            orig_chunk_size = self.chunk_size
-            self.chunk_size = min(256, orig_chunk_size)  # 256 chars per chunk
-            # Use get_or_create_collection and upsert as per ChromaDB docs
-            collection = self.chroma_client.get_or_create_collection(
+            self.collection = self.chroma_client.get_collection(
                 name=self.collection_name,
                 embedding_function=self.embedding_function
             )
-            with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                for page_num, page in enumerate(pdf_reader.pages):
-                    text = page.extract_text()
-                    if not text or not text.strip():
-                        continue
-                    for i, chunk in enumerate(self.split_text(text)):
-                        chunk_id = f"{doc_id}_{page_num+1}_{i}"
-                        # Use upsert for each chunk, no batching, minimal memory
-                        collection.upsert(
-                            documents=[chunk],
-                            ids=[chunk_id],
-                            metadatas=[{
-                                "document_id": doc_id,
-                                "filename": filename,
-                                "page": page_num+1,
-                                "chunk": i,
-                                "source": f"Page {page_num+1} of {filename}"
-                            }]
-                        )
-                        total_chunks += 1
-                        del chunk_id, chunk
-                    del text
-                del pdf_reader
-            self.chunk_size = orig_chunk_size  # Restore original chunk size
-            try:
-                os.remove(pdf_path)
-            except Exception as e:
-                logger.warning(f"Could not remove temp PDF file '{pdf_path}': {str(e)}")
-            return {"status": "success", "document": {"filename": filename, "num_chunks": total_chunks}}
-        except Exception as e:
-            logger.error(f"Error processing document: {str(e)}")
-            try:
-                os.remove(pdf_path)
-            except:
-                pass
-            return {"status": "error", "error": str(e)}
-
-    async def process(self, input_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
-        context = context or {}
+        except Exception:
+            # Collection doesn't exist, create it
+            self.collection = self.chroma_client.create_collection(
+                name=self.collection_name,
+                embedding_function=self.embedding_function,
+                metadata={"description": "RAG document collection"}
+            )
+        
         # If document provided, process it (only once)
         if "document_content" in context and "filename" in context:
             doc_result = await self.process_document(context["document_content"], context["filename"])
@@ -323,7 +294,7 @@ class RAGAgent(BaseAgent):
                     "message": f"Document '{context['filename']}' processed successfully",
                     "document": doc_result["document"]
                 }
-        # Query ChromaDB
+        # Query ChromaDB using the correct collection
         try:
             query_results = self.collection.query(query_texts=[input_text], n_results=self.num_results)
             # DEBUG: Log the raw ChromaDB query results
