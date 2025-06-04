@@ -17,10 +17,33 @@ class DocumentParserAgent(BaseAgent):
         """
         context = context or {}
         file_path = input_data if isinstance(input_data, str) else input_data.get("file_path")
-        if not file_path or not os.path.exists(file_path):
+        
+        if not file_path:
             return {
-                "output": f"File not found: {file_path}",
-                "error": "File not found",
+                "error": "No file path provided",
+                "output": "Error: No file path provided",
+                "agent_type": "document_parser"
+            }
+            
+        # Check if the file exists at the provided path
+        if not os.path.exists(file_path):
+            # Try alternative paths
+            input_path = os.path.join("_INPUT", os.path.basename(file_path))
+            output_path = os.path.join("_OUTPUT", os.path.basename(file_path))
+            
+            if os.path.exists(input_path):
+                file_path = input_path
+            elif os.path.exists(output_path):
+                file_path = output_path
+
+        if not file_path or not os.path.exists(file_path):
+            # Log all possible paths we tried
+            possible_input = os.path.join("_INPUT", os.path.basename(str(file_path)))
+            possible_output = os.path.join("_OUTPUT", os.path.basename(str(file_path)))
+            
+            return {
+                "error": f"Input document file not found: {file_path}",
+                "output": f"Error: Input document file not found. Checked paths: {file_path}, {possible_input}, {possible_output}",
                 "agent_type": "document_parser"
             }
 
