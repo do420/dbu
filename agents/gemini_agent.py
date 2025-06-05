@@ -27,22 +27,23 @@ class GeminiAgent(BaseAgent):
             today_str = datetime.datetime.now().strftime("%B %d, %Y")
             date_info = f"If applicable, today's date is: {today_str}."
             
+            # Create structured system prompt to prevent prompt injection
             if self.system_instruction:
-                system_prompt = f"{self.system_instruction}\n\n{date_info}"
+                system_content = f"{self.system_instruction}\n\n{date_info}"
             else:
-                system_prompt = date_info
+                system_content = date_info
 
+            # Structure the prompt with role-based format
+            system_message = {"role": "system", "content": system_content}
+            user_message = {"role": "user", "content": input_text}
 
-
-            logger.debug(f"Using system prompt: {system_prompt}")
+            logger.debug(f"Using system message: {system_message}")
             
             # Prepare generation config
             generation_config = {}
             
-            if system_prompt:
-                formatted_input = f"System: {system_prompt}\n\nUser: {input_text}"
-            else:
-                formatted_input = input_text
+            # Format the messages properly for Gemini API
+            formatted_input = f"[{system_message['role']}]: {system_message['content']}\n\n[{user_message['role']}]: {user_message['content']}"
             
             # Make API calls
             if context.get("history"):

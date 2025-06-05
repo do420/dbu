@@ -324,8 +324,25 @@ class RAGAgent(BaseAgent):
                     sources.append(source_info)
                 debug_chunks = chunks
                 debug_metadatas = metadatas
-            # Build prompt with RAG context
-            rag_prompt = f"""You are an AI assistant with access to the following document information:\n\n{context_text}\n\nBased on the above context and your knowledge, please respond to this query:\n{input_text}\n\nPlease be accurate, helpful, and only use information from the provided context when answering specific questions about the document content.\nIf you don't know or the information isn't in the context, say so rather than making up an answer.\n\n{self.system_instruction}\n"""
+            from datetime import date
+            today_str = date.today().strftime("%B %d, %Y")
+            # Build structured prompt with RAG context to prevent prompt injection
+            system_content = f"""You are an AI assistant with access to the following document information:
+
+{context_text}
+
+Please be accurate, helpful, and ONLY use information from the provided context when answering specific questions about the document content.
+If you don't know or the information isn't in the context, say "The document does not provide that information.". You are not allowed to use your own knowledge or make up information.
+If you ever need it, this is the today's date: {today_str}.
+
+{self.system_instruction}"""
+
+            # Create structured messages to prevent prompt injection
+            system_message = {"role": "system", "content": system_content}
+            user_message = {"role": "user", "content": input_text}
+            
+            # Format the messages properly for Gemini API
+            rag_prompt = f"[{system_message['role']}]: {system_message['content']}\n\n[{user_message['role']}]: {user_message['content']}"
             # Generate response using Gemini
             response = self.model.generate_content(rag_prompt)
             # Extract the response text
