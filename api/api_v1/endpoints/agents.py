@@ -23,7 +23,7 @@ router = APIRouter()
 
 
 
-@router.get("/types", response_model=List[Dict[str, str]])
+@router.get("/types", response_model=List[Dict[str, Any]])
 async def get_agent_types():
     """Get a list of available agent types with their input and output types"""
     agent_types = [
@@ -31,75 +31,147 @@ async def get_agent_types():
             "type": "gemini",
             "input_type": "text",
             "output_type": "text",
-            "api_key_required": "True"
+            "api_key_required": "True",
+            "endpoint": f"/agents/{{agent_id}}/run",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+           
         },
         {
             "type": "openai",
             "input_type": "text",
             "output_type": "text",
-            "api_key_required": "True"
+            "api_key_required": "True",
+            "endpoint": f"/agents/{{agent_id}}/run",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+           
+           
         },
         {
             "type": "edge_tts",
             "input_type": "text",
             "output_type": "sound",
-            "api_key_required": "False"
+            "api_key_required": "False",
+            "endpoint": f"/agents/{{agent_id}}/tts",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+           
+            
+            
         },
         {
             "type": "bark_tts",
             "input_type": "text",
             "output_type": "sound",
-             "api_key_required": "False"
+            "api_key_required": "False",
+            "endpoint": f"/agents/{{agent_id}}/bark-tts",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+         
+            
+            
         },
         {
             "type": "transcribe",
             "input_type": "sound",
             "output_type": "text",
-            "api_key_required": "False"
+            "api_key_required": "False",
+            "endpoint": f"/agents/{{agent_id}}/transcribe",
+            "fileFieldName": "file",
+            "supportedFileTypes": [".mp3", ".wav", ".mp4", ".m4a", ".webm"],
+            "maxFileSize": 25,
+            "requiresUpload": True,
+            
         },
         {
             "type": "gemini_text2image",
             "input_type": "text",
             "output_type": "image",
-            "api_key_required": "True"
+            "api_key_required": "True",
+            "endpoint": f"/agents/{{agent_id}}/run/image",
+            "fileFieldName": "prompt",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+
+            
         },
         {
             "type": "internet_research",
             "input_type": "text",
             "output_type": "text",
-            "api_key_required": "False"
+            "api_key_required": "False",
+            "endpoint": f"/agents/{{agent_id}}/run",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+
+            
         },
         {
             "type": "document_parser",
             "input_type": "document",
             "output_type": "text",
-            "api_key_required": "False"
+            "api_key_required": "False",
+            "endpoint": f"/agents/{{agent_id}}/run",
+            "fileFieldName": "file",
+            "supportedFileTypes": [".pdf", ".docx", ".txt"],
+            "maxFileSize": 15,
+            "requiresUpload": True,
+            
         },        {
             "type": "custom_endpoint_llm",
             "input_type": "text",
             "output_type": "text",
-            "api_key_required": "True"
+            "api_key_required": "True",
+            "endpoint": f"/agents/{{agent_id}}/run",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+        
         },
         {
             "type": "rag",
             "input_type": "text",
             "output_type": "text",
-            "api_key_required": "True"
+            "api_key_required": "True",
+            "endpoint": f"/agents/{{agent_id}}/run",
+            "fileFieldName": "input",
+            "supportedFileTypes": [".pdf"],
+            "maxFileSize": 20,
+            "requiresUpload": True,
+            
         },
         {
             "type": "google_translate",
             "input_type": "text",
             "output_type": "text",
-            "api_key_required": "False"
+            "api_key_required": "False",
+            "endpoint": f"/agents/{{agent_id}}/translate",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+            
+            
         },
         {
             "type": "claude",
             "input_type": "text",
             "output_type": "text",
-            "api_key_required": "True"
+            "api_key_required": "True",
+            "endpoint": f"/agents/{{agent_id}}/run",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+
         },
     ]
     return agent_types
+
 
 @router.post("/", response_model=AgentInDB)
 async def create_agent_endpoint(
@@ -1136,13 +1208,11 @@ async def get_agent_documents(
         )
 
     try:
-        # Check ChromaDB collection directory
-        chroma_dir = os.path.join("db", "chroma", f"rag_collection_{db_agent.name}")
+        # Check ChromaDB collection directory - use the same pattern as creation
+        chroma_dir = os.path.join("db", "chroma", str(agent_id))
+        
         if not os.path.exists(chroma_dir):
-            # Try fallback to id-based dir for backward compatibility
-            chroma_dir = os.path.join("db", "chroma", f"rag_collection_{agent_id}")
-
-        if not os.path.exists(chroma_dir):
+            logger.warning(f"ChromaDB directory not found at {chroma_dir}")
             return {"documents": []}
 
         # Load ChromaDB collection and get documents
@@ -1168,9 +1238,13 @@ async def get_agent_documents(
             google_api_key=gemini_api_key
         )
 
+        # Use the same collection name as used during creation
+        collection_name = f"rag_collection_{agent_id}"
+        
         chroma_db = Chroma(
             embedding_function=embeddings,
-            persist_directory=chroma_dir
+            persist_directory=chroma_dir,
+            collection_name=collection_name
         )
 
         # Get all documents from the collection
@@ -1189,6 +1263,7 @@ async def get_agent_documents(
                 }
             documents[source]["chunks"] += 1
 
+        logger.info(f"Found {len(documents)} documents for RAG agent {agent_id}")
         return {"documents": list(documents.values())}
 
     except Exception as e:
