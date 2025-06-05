@@ -347,16 +347,39 @@ If you ever need it, this is the today's date: {today_str}.
             response = self.model.generate_content(rag_prompt)
             # Extract the response text
             response_text = response.text if hasattr(response, "text") else str(response)
-            # Calculate token usage (approximate since Gemini doesn't always return this)
-            # Estimation: ~4 chars per token
-            prompt_tokens = len(rag_prompt) // 4
-            completion_tokens = len(response_text) // 4
-            total_tokens = prompt_tokens + completion_tokens
-            token_usage = {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens
-            }
+            
+            # Get actual token usage from Gemini response
+            token_usage = {}
+            try:
+                if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                    usage = response.usage_metadata
+                    token_usage = {
+                        "prompt_tokens": usage.prompt_token_count,
+                        "completion_tokens": usage.candidates_token_count,
+                        "total_tokens": usage.total_token_count
+                    }
+                    logger.debug(f"Actual token usage from Gemini: {token_usage}")
+                else:
+                    # Fallback to estimation if usage_metadata is not available
+                    logger.warning("Usage metadata not available, using estimation")
+                    prompt_tokens = len(rag_prompt) // 4
+                    completion_tokens = len(response_text) // 4
+                    total_tokens = prompt_tokens + completion_tokens
+                    token_usage = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens
+                    }
+            except Exception as e:
+                logger.warning(f"Error getting token usage: {e}, using estimation")
+                prompt_tokens = len(rag_prompt) // 4
+                completion_tokens = len(response_text) // 4
+                total_tokens = prompt_tokens + completion_tokens
+                token_usage = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens
+                }
             # Return debug info for troubleshooting
             return {
                 "output": response_text,

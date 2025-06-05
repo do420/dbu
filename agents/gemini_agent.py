@@ -59,13 +59,34 @@ class GeminiAgent(BaseAgent):
                 else:
                     response = self.model.generate_content(formatted_input)
             
-            # Track token usage (approximate since Gemini doesn't provide exact tokens)
-            # This is an estimation - in a real system you would use the actual count from the API
-            token_usage = {
-                "prompt_tokens": len(formatted_input.split()) * 1.3,  # Rough estimate
-                "completion_tokens": len(response.text.split()) * 1.3,  # Rough estimate
-                "total_tokens": len(formatted_input.split() + response.text.split()) * 1.3  # Rough estimate
-            }
+            # Get actual token usage from Gemini response
+            token_usage = {}
+            try:
+                if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                    usage = response.usage_metadata
+                    token_usage = {
+                        "prompt_tokens": usage.prompt_token_count,
+                        "completion_tokens": usage.candidates_token_count,
+                        "total_tokens": usage.total_token_count
+                    }
+                    print(f"ACTUAL Token usage metadata: {token_usage}")
+                    logger.debug(f"Actual token usage from Gemini: {token_usage}")
+                else:
+                    # Fallback to estimation if usage_metadata is not available
+                    print("Usage metadata not available, using estimation")
+                    logger.warning("Usage metadata not available, using estimation")
+                    token_usage = {
+                        "prompt_tokens": len(formatted_input.split()) * 1.3,  # Rough estimate
+                        "completion_tokens": len(response.text.split()) * 1.3,  # Rough estimate
+                        "total_tokens": len(formatted_input.split() + response.text.split()) * 1.3  # Rough estimate
+                    }
+            except Exception as e:
+                logger.warning(f"Error getting token usage: {e}, using estimation")
+                token_usage = {
+                    "prompt_tokens": len(formatted_input.split()) * 1.3,  # Rough estimate
+                    "completion_tokens": len(response.text.split()) * 1.3,  # Rough estimate
+                    "total_tokens": len(formatted_input.split() + response.text.split()) * 1.3  # Rough estimate
+                }
             
             logger.debug(f"GeminiAgent response received")
             return {
