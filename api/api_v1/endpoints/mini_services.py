@@ -131,7 +131,7 @@ async def create_mini_service(
         average_token_usage={},
         run_time=0,
         is_enhanced=is_enhanced,
-        is_public= mini_service.is_public or False,  # Default to private if not specified
+        is_public=getattr(mini_service, 'is_public', False),
     )
 
     visibility_status = "public" if mini_service.is_public else "private"
