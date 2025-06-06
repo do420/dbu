@@ -157,8 +157,7 @@ async def get_agent_types():
             "maxFileSize": 0,
             
             
-        },
-        {
+        },        {
             "type": "claude",
             "input_type": "text",
             "output_type": "text",
@@ -168,6 +167,17 @@ async def get_agent_types():
             "supportedFileTypes": [],
             "maxFileSize": 0,
 
+        },
+        {
+            "type": "file_output",
+            "input_type": "text",
+            "output_type": "document",
+            "api_key_required": "True",
+            "endpoint": f"/agents/{{agent_id}}/run",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+            "description": "Creates files in various formats (txt, docx, pdf, code files) based on text input"
         },
     ]
     return agent_types

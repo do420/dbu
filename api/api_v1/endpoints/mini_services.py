@@ -986,8 +986,8 @@ AVAILABLE AGENTS AND THEIR REQUIRED CONFIGURATIONS:
   Config: {{"target_language": "es"}} (use proper language code like "es" for Spanish, "fr" for French, "de" for German, etc.)
 - rag: Document Q&A with RAG (text → text)
   Config: {{"model": "gemini-1.5-flash", "temperature": 0.7, "max_tokens": 1024, "num_results": 5}}
-- custom_endpoint_llm: Custom API endpoint (text → text)
-  Config: {{"endpoint_url": "https://api.example.com/generate"}}
+- file_output: Create files from text (text → file)
+  Config: {{"document_type": "docx", "use_ai_formatting": true}} (document_type can be: txt, docx, pdf, py, java, c, cpp, js, ts, html, css)
 
 Generate a complete service specification with NO "TBD" values. Use the EXACT config format for each agent type:
 
@@ -1136,3 +1136,50 @@ Respond with ONLY a JSON object:
 
 
 
+
+# endpoint for downloading the file output of a mini service. it accepts the file_name as a query parameter
+@router.get("/file-output/{service_id}", response_class=FileResponse)
+async def get_file_output(
+    service_id: int,
+    file_name: str,
+    db: Session = Depends(get_db),
+    current_user_id: int = None  # Replace with actual user ID from authentication
+):
+    """Download the file output of a mini service"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    # Check if mini service exists and belongs to the user
+    mini_service = db.query(MiniService).filter(
+        MiniService.id == service_id,
+        MiniService.owner_id == current_user_id
+    ).first()
+    
+    if not mini_service:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mini service with ID {service_id} not found"
+        )
+    
+    # Construct the file path
+    file_path = os.path.join("_OUTPUT", file_name)
+    
+    # Check if file exists
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File '{file_name}' for mini service {service_id} not found"
+        )
+    
+    return FileResponse(
+        path=file_path,
+        media_type="application/octet-stream",
+        filename=file_name
+    )
+
+
+# example request for get file output endpoint:
+# GET /api/v1/mini-services/file-output/1?file_name=output.txt
