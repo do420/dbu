@@ -196,21 +196,28 @@ class TestPerformance:
                 "average_token_usage": {}
             }
             mock_services.append((mock_service, f"user{i}"))
-        
-        # Mock the complex query chain
-        mock_query = Mock()
-        mock_query.join.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.offset.return_value = mock_query
-        mock_query.limit.return_value = mock_query
-        mock_query.all.return_value = mock_services
-        
-        mock_db.query.return_value = mock_query
+          # Mock the main mini services query
+        mock_main_query = Mock()
+        mock_main_query.join.return_value = mock_main_query
+        mock_main_query.filter.return_value = mock_main_query
+        mock_main_query.offset.return_value = mock_main_query
+        mock_main_query.limit.return_value = mock_main_query
+        mock_main_query.all.return_value = mock_services
         
         # Mock agent query
+        mock_agent_query = Mock()
         mock_agent = Mock()
         mock_agent.agent_type = "openai"
-        mock_db.query.return_value.filter.return_value.all.return_value = [mock_agent]
+        mock_agent_query.filter.return_value.all.return_value = [mock_agent]
+          # Set up the db.query to return different mocks based on the model being queried
+        def mock_query_side_effect(*args):
+            model_class = args[0] if args else None
+            if model_class and hasattr(model_class, '__name__') and 'Agent' in model_class.__name__:
+                return mock_agent_query
+            else:
+                return mock_main_query
+        
+        mock_db.query.side_effect = mock_query_side_effect
         
         start_time = time.time()
         

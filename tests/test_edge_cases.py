@@ -366,22 +366,35 @@ class TestConcurrencyAndRaceConditions:
                     results.append(result)
                 except Exception as e:
                     results.append(e)
-            
-            # Should handle concurrent access gracefully
+              # Should handle concurrent access gracefully
             assert len(results) == 3
 
     @pytest.mark.asyncio
     async def test_race_condition_in_service_deletion(self, mock_db):
         """Test race condition when deleting service"""
         # Mock service found first time, not found second time
-        mock_execute = Mock()
-        mock_execute.scalar_one_or_none.side_effect = [
-            Mock(id=1, name="Test Service", owner_id=1),  # Found
-            None  # Not found on second attempt
-        ]
-        mock_db.execute.return_value = mock_execute
+        mock_service = Mock(id=1, name="Test Service", owner_id=1)
+        
+        # First call - service found
+        mock_execute_result_1 = Mock()
+        mock_execute_result_1.scalar_one_or_none.return_value = mock_service
+        
+        # Mock the scalars for process deletion
+        mock_scalars = Mock()
+        mock_scalars.all.return_value = []  # No related processes
+        
+        mock_execute_result_2 = Mock()
+        mock_execute_result_2.scalars.return_value = mock_scalars
+        
+        # Second call - service not found (for race condition)
+        mock_execute_result_3 = Mock()
+        mock_execute_result_3.scalar_one_or_none.return_value = None
+        
+        # Set up execute calls: first for service lookup, second for process lookup, third for second service lookup
+        mock_db.execute.side_effect = [mock_execute_result_1, mock_execute_result_2, mock_execute_result_3]
         mock_db.delete = Mock()
         mock_db.commit = Mock()
+        mock_db.rollback = Mock()
         
         with patch('api.api_v1.endpoints.mini_services.create_log'):
             # First deletion should succeed

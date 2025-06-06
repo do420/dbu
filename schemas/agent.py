@@ -13,6 +13,14 @@ class AgentBase(BaseModel):
 class AgentCreate(AgentBase):
     pass
 
+class AgentUpdate(BaseModel):
+    name: Optional[str] = None
+    system_instruction: Optional[str] = None
+    agent_type: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    input_type: Optional[str] = None
+    output_type: Optional[str] = None
+
 class AgentInDB(AgentBase):
     id: int
     owner_id: int
