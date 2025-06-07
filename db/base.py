@@ -9,6 +9,7 @@ from models.process import Process
 from models.log import Log
 from models.favorite_service import FavoriteService
 from models.favorite_agent import FavoriteAgent
+from models.chat_conversation import ChatConversation
 
 # This ensures that all models are registered with SQLAlchemy metadata
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "Process", 
     "Log",
     "FavoriteService",
-    "FavoriteAgent"
+    "FavoriteAgent",
+    "ChatConversation"
 ]

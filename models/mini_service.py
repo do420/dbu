@@ -16,7 +16,7 @@ class MiniService(Base):
     average_token_usage = Column(JSON, default={}, nullable=False)
     run_time = Column(Integer, default=0, nullable=False)
     is_enhanced = Column(Boolean, default=False)
-    is_public = Column(Boolean, default=False)  # New field for public/private visibility
-      # Relationships
+    is_public = Column(Boolean, default=False)  # New field for public/private visibility      # Relationships
     owner = relationship("User", back_populates="mini_services")
     processes = relationship("Process", back_populates="mini_service", passive_deletes="all")
+    chat_conversations = relationship("ChatConversation", back_populates="mini_service")

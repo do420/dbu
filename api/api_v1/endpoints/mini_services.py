@@ -11,7 +11,9 @@ from db.session import get_db
 from models.mini_service import MiniService
 from models.agent import Agent
 from models.process import Process
+from models.chat_conversation import ChatConversation
 from schemas.mini_service import MiniServiceCreate, MiniServiceInDB
+from schemas.chat_conversation import ChatConversationCreate, ChatConversationInDB, ChatConversationUpdate, ChatMessage
 from agents import create_agent
 from agents.multi_agent import WorkflowProcessor
 import logging
@@ -21,6 +23,7 @@ from sqlalchemy.orm.attributes import flag_modified
 import google.generativeai as genai
 from core.security import decrypt_api_key
 from core.pricing_utils import pricing_calculator
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -422,6 +425,54 @@ async def list_mini_services(
     
     return result
 
+@router.get("/conv-list", response_model=List[ChatConversationInDB])
+async def list_user_chat_conversations(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """List all chat conversations for the current user"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    conversations = db.query(ChatConversation).filter(
+        ChatConversation.user_id == current_user_id
+    ).offset(skip).limit(limit).all()
+    
+    return conversations
+
+
+@router.get("/conv-get/{conversation_id}", response_model=ChatConversationInDB)
+async def get_chat_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Get a specific chat conversation by ID"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    conversation = db.query(ChatConversation).filter(
+        ChatConversation.id == conversation_id,
+        ChatConversation.user_id == current_user_id
+    ).first()
+    
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Chat conversation with ID {conversation_id} not found"
+        )
+    
+    return conversation
+
+
 @router.get("/{service_id}", response_model=MiniServiceInDB)
 async def get_mini_service(
     service_id: int, 
@@ -808,7 +859,7 @@ async def chat_generate_mini_service(
                         "agent_id": actual_agent_id,
                         "next": node_data["next"]
                     }
-                
+                print(f"Updated workflow: {updated_workflow}")
                 # Check if any agent is enhanced
                 is_enhanced = any(agent.is_enhanced for agent in created_agents)
                 
@@ -908,7 +959,7 @@ CHECKLIST ITEMS TO TRACK:
 1. SERVICE PURPOSE: What specific task will this service accomplish?
 2. INPUT TYPE: What will the user provide? (text, image, sound)
 3. OUTPUT TYPE: What should the service return? (text, image, sound) 
-4. SERVICE NAME: A simple, clear name for the service
+4. SERVICE NAME: A name for this service. You can suggest a name based on the purpose.
 
 ANALYZE the conversation and determine which checklist items are complete. Extract specific values when mentioned.
 
@@ -984,9 +1035,7 @@ AVAILABLE AGENTS AND THEIR REQUIRED CONFIGURATIONS:
   Config: {{}}
 - google_translate: Translation (text → text)
   Config: {{"target_language": "es"}} (use proper language code like "es" for Spanish, "fr" for French, "de" for German, etc.)
-- rag: Document Q&A with RAG (text → text)
-  Config: {{"model": "gemini-1.5-flash", "temperature": 0.7, "max_tokens": 1024, "num_results": 5}}
-- file_output: Create files from text (text → file)
+- file_output: Create files from text (text → document)
   Config: {{"document_type": "docx", "use_ai_formatting": true}} (document_type can be: txt, docx, pdf, py, java, c, cpp, js, ts, html, css)
 
 Generate a complete service specification with NO "TBD" values. Use the EXACT config format for each agent type:
@@ -996,7 +1045,7 @@ Generate a complete service specification with NO "TBD" values. Use the EXACT co
         "name": "exact service name",
         "description": "detailed description",
         "input_type": "text/image/sound/document",
-        "output_type": "text/image/sound",
+        "output_type": "text/image/sound/document",
         "is_public": false
     }},
     "agents": [
@@ -1021,8 +1070,8 @@ Generate a complete service specification with NO "TBD" values. Use the EXACT co
 IMPORTANT NOTES:
 - For google_translate: Choose target_language based on service purpose. Common codes: "es" (Spanish), "fr" (French), "de" (German), "zh" (Chinese), "ja" (Japanese), "ko" (Korean), "ru" (Russian), "ar" (Arabic), "hi" (Hindi), "pt" (Portuguese), "it" (Italian), "tr" (Turkish)
 - For gemini: Use "gemini-1.5-flash" for general tasks, "gemini-pro" for complex reasoning
-- For rag: Requires pre-uploaded documents for document-based Q&A functionality
-- For custom_endpoint_llm: endpoint_url must be a valid HTTP/HTTPS URL that accepts POST requests
+
+
 - Agent workflow: Each agent processes sequentially (0 → 1 → 2 → etc.), last agent has "next": null
 
 CRITICAL: Use specific agent types, no TBD values, workflow starts at node "0", last node has "next": null.
@@ -1134,10 +1183,228 @@ Respond with ONLY a JSON object:
             detail=f"Chat generation failed: {str(e)}"
         )
 
+def _is_mini_service_chat_eligible(mini_service: MiniService, db: Session) -> bool:
+    """
+    Check if a mini service is eligible for chat functionality.
+    Criteria:
+    - output_type is 'text'
+    - requires an API key
+    - does not include any of the following agent types: tts, document_parser, file_output, image generation
+    """
+    # Check output type
+    if mini_service.output_type != "text":
+        return False
+    
+    # Get all agent IDs from workflow
+    agent_ids = set()
+    for node in mini_service.workflow.get("nodes", {}).values():
+        agent_id = node.get("agent_id")
+        if agent_id is not None:
+            agent_ids.add(int(agent_id))
+    
+    if not agent_ids:
+        return False
+    
+    # Query agents to check types and API key requirements
+    agents = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+    
+    excluded_types = {"tts", "document_parser", "file_output", "image_generation", "bark_tts", "edge_tts"}
+    requires_api_key = False
+    
+    for agent in agents:
+        agent_type = agent.agent_type.lower()
+        
+        # Check if agent type is excluded
+        if agent_type in excluded_types:
+            return False
+        
+        # Check if agent requires API key (external agents like gemini, openai)
+        if agent_type in {"gemini", "openai"}:
+            requires_api_key = True
+    
+    return requires_api_key
 
 
+@router.post("/{service_id}/conversations", response_model=ChatConversationInDB)
+async def create_chat_conversation(
+    service_id: int,
+    conversation_data: ChatConversationCreate,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Create a new chat conversation for a mini service"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    # Check if mini service exists and user has access
+    mini_service = db.query(MiniService).filter(
+        MiniService.id == service_id
+    ).first()
+    
+    if not mini_service:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mini service with ID {service_id} not found"
+        )
+    
+    # Check permissions
+    if mini_service.is_public is not True and mini_service.owner_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this mini service"
+        )
+    
+    # Check if mini service is eligible for chat
+    if not _is_mini_service_chat_eligible(mini_service, db):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This mini service is not eligible for chat functionality"
+        )
+    
+    # Create chat conversation
+    chat_conversation = ChatConversation(
+        user_id=current_user_id,
+        mini_service_id=service_id,
+        conversation=conversation_data.conversation
+    )
+    
+    db.add(chat_conversation)
+    db.commit()
+    db.refresh(chat_conversation)
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=0,
+        description=f"Created chat conversation for mini-service: '{mini_service.name}'"
+    )
+    
+    return chat_conversation
 
-# endpoint for downloading the file output of a mini service. it accepts the file_name as a query parameter
+
+@router.put("/conversations/{conversation_id}", response_model=ChatConversationInDB)
+async def update_chat_conversation(
+    conversation_id: int,
+    conversation_update: ChatConversationUpdate,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Update a chat conversation"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    conversation = db.query(ChatConversation).filter(
+        ChatConversation.id == conversation_id,
+        ChatConversation.user_id == current_user_id
+    ).first()
+    
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Chat conversation with ID {conversation_id} not found"
+        )
+    
+    # Update conversation
+    conversation.conversation = conversation_update.conversation
+    conversation.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(conversation)
+    
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=0,
+        description=f"Updated chat conversation ID {conversation_id}"
+    )
+    
+    return conversation
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_chat_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Delete a chat conversation"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    conversation = db.query(ChatConversation).filter(
+        ChatConversation.id == conversation_id,
+        ChatConversation.user_id == current_user_id
+    ).first()
+    
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Chat conversation with ID {conversation_id} not found"
+        )
+    
+    create_log(
+        db=db,
+        user_id=current_user_id,
+        log_type=4,
+        description=f"Deleted chat conversation ID {conversation_id}"
+    )
+    
+    db.delete(conversation)
+    db.commit()
+    
+    return None
+
+
+@router.get("/{service_id}/conversations/eligible")
+async def check_mini_service_chat_eligibility(
+    service_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = None
+):
+    """Check if a mini service is eligible for chat functionality"""
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    
+    # Check if mini service exists and user has access
+    mini_service = db.query(MiniService).filter(
+        MiniService.id == service_id
+    ).first()
+    
+    if not mini_service:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mini service with ID {service_id} not found"
+        )
+    
+    # Check permissions
+    if mini_service.is_public is not True and mini_service.owner_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this mini service"
+        )
+    
+    is_eligible = _is_mini_service_chat_eligible(mini_service, db)
+    
+    return {
+        "mini_service_id": service_id,
+        "is_chat_eligible": is_eligible,
+        "mini_service_name": mini_service.name
+    }
+
+
+# example request for get file output endpoint:
+# GET /api/v1/mini-services/file-output/1?file_name=output.txt
 @router.get("/file-output/{service_id}", response_class=FileResponse)
 async def get_file_output(
     service_id: int,
@@ -1179,7 +1446,3 @@ async def get_file_output(
         media_type="application/octet-stream",
         filename=file_name
     )
-
-
-# example request for get file output endpoint:
-# GET /api/v1/mini-services/file-output/1?file_name=output.txt
