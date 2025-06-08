@@ -1195,6 +1195,9 @@ def _is_mini_service_chat_eligible(mini_service: MiniService, db: Session) -> bo
     if mini_service.output_type != "text":
         return False
     
+    if mini_service.input_type != "text":
+        return False
+    
     # Get all agent IDs from workflow
     agent_ids = set()
     for node in mini_service.workflow.get("nodes", {}).values():
@@ -1219,7 +1222,7 @@ def _is_mini_service_chat_eligible(mini_service: MiniService, db: Session) -> bo
             return False
         
         # Check if agent requires API key (external agents like gemini, openai)
-        if agent_type in {"gemini", "openai"}:
+        if agent_type in {"gemini", "openai", "rag"}:
             requires_api_key = True
     
     return requires_api_key
