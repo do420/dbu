@@ -21,6 +21,8 @@ class MiniServiceInDB(MiniServiceBase):
     run_time: int
     is_enhanced: Optional[bool] = False  # Changed to Optional with default=False
     owner_username: Optional[str] = None  # Added username field
+    favorite_count: Optional[int] = 0  # Number of users who favorited this service
+    is_favorited: Optional[bool] = False  # Whether current user has favorited this service
 
     class Config:
         orm_mode = True

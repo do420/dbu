@@ -5,13 +5,14 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 from core.log_utils import create_log
 from db.session import get_db
 from models.mini_service import MiniService
 from models.agent import Agent
 from models.process import Process
 from models.chat_conversation import ChatConversation
+from models.favorite_service import FavoriteService
 from schemas.mini_service import MiniServiceCreate, MiniServiceInDB
 from schemas.chat_conversation import ChatConversationCreate, ChatConversationInDB, ChatConversationUpdate, ChatMessage
 from agents import create_agent
@@ -368,7 +369,6 @@ async def list_mini_services(
         )
     
     # Fetch mini services that are public or owned by the current user
-    
     mini_services = db.query(
         MiniService, User.username
     ).join(
@@ -378,11 +378,40 @@ async def list_mini_services(
         (MiniService.owner_id == current_user_id)
     ).offset(skip).limit(limit).all()
     
-    # Add owner_username to each mini service
+    # Extract service IDs for batch favorite queries
+    service_ids = [mini_service.id for mini_service, _ in mini_services]
+    
+    # Get favorite counts for all services in one query
+    favorite_counts = {}
+    if service_ids:
+        favorite_count_results = db.query(
+            FavoriteService.mini_service_id,
+            func.count(FavoriteService.id).label('favorite_count')
+        ).filter(
+            FavoriteService.mini_service_id.in_(service_ids)
+        ).group_by(FavoriteService.mini_service_id).all()
+        
+        favorite_counts = {service_id: count for service_id, count in favorite_count_results}
+    
+    # Get user's favorited services in one query
+    user_favorites = set()
+    if service_ids:
+        user_favorite_results = db.query(FavoriteService.mini_service_id).filter(
+            FavoriteService.mini_service_id.in_(service_ids),
+            FavoriteService.user_id == current_user_id
+        ).all()
+        
+        user_favorites = {service_id for (service_id,) in user_favorite_results}
+    
+    # Add owner_username and favorite information to each mini service
     result = []
     for mini_service, username in mini_services:
         mini_service_dict = mini_service.__dict__.copy()
         mini_service_dict["owner_username"] = username
+        
+        # Add favorite information
+        mini_service_dict["favorite_count"] = favorite_counts.get(mini_service.id, 0)
+        mini_service_dict["is_favorited"] = mini_service.id in user_favorites
 
         # Extract agent IDs from workflow
         workflow = mini_service_dict.get("workflow", {})
