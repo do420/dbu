@@ -89,7 +89,7 @@ async def get_agent_types():
             
         },
         {
-            "type": "gemini_text2image",
+            "type": "dalle",
             "input_type": "text",
             "output_type": "image",
             "api_key_required": "True",

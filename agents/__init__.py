@@ -8,7 +8,7 @@ from .openai_agent import OpenAIAgent
 from .tts_agent import TTSAgent
 from .bark_agent import BarkTTSAgent
 
-from .gemini_image_generation_agent import GeminiImageGeneration
+from .openai_image_generation_agent import OpenAIImageGeneration
 from .internet_research_agent import InternetResearchAgent
 from .document_parser_agent import DocumentParserAgent
 from .custom_endpoint_agent import CustomEndpointAgent
@@ -34,8 +34,8 @@ def create_agent(agent_type: str, config: Dict[str, Any], system_instruction: st
         return BarkTTSAgent(config, system_instruction)
     elif agent_type.lower() == "transcribe":
         return TranscribeAgent(config, system_instruction)
-    elif agent_type.lower() == "gemini_text2image":
-        return GeminiImageGeneration(config, system_instruction)
+    elif agent_type.lower() == "dalle":
+        return OpenAIImageGeneration(config, system_instruction)
     elif agent_type.lower() == "internet_research":
         return InternetResearchAgent(config, system_instruction)
     elif agent_type.lower() == "document_parser":
