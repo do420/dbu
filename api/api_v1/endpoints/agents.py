@@ -2,6 +2,7 @@ import os
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from agents.transribe_agent import TranscribeAgent
 from core.log_utils import create_log
 from db.session import get_db
@@ -384,14 +385,14 @@ async def create_agent_endpoint(
     db.refresh(db_agent)
     return db_agent
 
-@router.get("/", response_model=List[AgentInDB])
+@router.get("/", response_model=List[Dict[str, Any]])
 async def list_agents(
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db),
     current_user_id: int = None  # Replace with actual user ID from authentication
 ):
-    """List all agents owned by the current user and visible agents only"""
+    """List all agents with favorite information included"""
     # Only include agents where visible == 1
     if current_user_id is not None:
         agents = db.query(Agent).filter(
@@ -406,7 +407,46 @@ async def list_agents(
             (Agent.visible == 1) &
             (Agent.agent_type != "rag")
         ).offset(skip).limit(limit).all()
-    return agents
+    
+    # Extract agent IDs for batch favorite queries
+    agent_ids = [agent.id for agent in agents]
+    
+    # Get favorite counts for all agents in one query
+    favorite_counts = {}
+    if agent_ids:
+        favorite_count_results = db.query(
+            FavoriteAgent.agent_id,
+            func.count(FavoriteAgent.id).label('favorite_count')
+        ).filter(
+            FavoriteAgent.agent_id.in_(agent_ids)
+        ).group_by(FavoriteAgent.agent_id).all()
+        
+        favorite_counts = {agent_id: count for agent_id, count in favorite_count_results}
+    
+    # Get user's favorited agents in one query (only if user is authenticated)
+    user_favorites = set()
+    if current_user_id and agent_ids:
+        user_favorite_results = db.query(FavoriteAgent.agent_id).filter(
+            FavoriteAgent.agent_id.in_(agent_ids),
+            FavoriteAgent.user_id == current_user_id
+        ).all()
+        
+        user_favorites = {agent_id for (agent_id,) in user_favorite_results}
+    
+    # Add favorite information to each agent
+    result = []
+    for agent in agents:
+        agent_dict = agent.__dict__.copy()
+        # Remove SQLAlchemy internal attribute
+        agent_dict.pop('_sa_instance_state', None)
+        
+        # Add favorite information
+        agent_dict["favorite_count"] = favorite_counts.get(agent.id, 0)
+        agent_dict["is_favorited"] = agent.id in user_favorites
+        
+        result.append(agent_dict)
+    
+    return result
 
 
 
