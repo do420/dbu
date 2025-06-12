@@ -7,7 +7,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 class GeminiAgent(BaseAgent):
-    """Agent that uses Google's Gemini model"""
+    """Agent that uses Google's Gemini model
+    
+    Supported config parameters:
+    - api_key: Gemini API key (required)
+    - model_name: Model name (default: "gemini-1.5-flash")
+    - temperature: Controls randomness (0.0-2.0, default: 0.7)
+    - top_p: Controls diversity via nucleus sampling (0.0-1.0, default: 0.8)
+    - top_k: Controls diversity via top-k sampling (1-40, default: 40)
+    - max_output_tokens: Maximum tokens in response (default: 8192)
+    - response_mime_type: Response format (default: "text/plain")
+        Available options:
+        * "text/plain" - Standard text output (default)
+        * "application/json" - JSON response format
+        * "text/x.enum" - ENUM as string response
+    - response_schema: Output schema (optional, requires "application/json" mime type)
+    """
     
     def __init__(self, config: Dict[str, Any], system_instruction: str):
         super().__init__(config, system_instruction)
@@ -38,26 +53,33 @@ class GeminiAgent(BaseAgent):
             user_message = {"role": "user", "content": input_text}
 
             logger.debug(f"Using system message: {system_message}")
+              # Prepare generation config with parameters from config or defaults
+            generation_config = {
+                "temperature": self.config.get("temperature", 0.7),
+                "top_p": self.config.get("top_p", 0.8),
+                "top_k": self.config.get("top_k", 40),
+                "max_output_tokens": self.config.get("max_output_tokens", 8192),
+                "response_mime_type": self.config.get("response_mime_type", "text/plain")
+            }
             
-            # Prepare generation config
-            generation_config = {}
+            # Add response_schema if provided (only valid with application/json mime type)
+            if "response_schema" in self.config:
+                generation_config["response_schema"] = self.config["response_schema"]
+            
+            # Remove None values and convert to GenerationConfig if needed
+            generation_config = {k: v for k, v in generation_config.items() if v is not None}
+            
+            logger.debug(f"Using generation config: {generation_config}")
             
             # Format the messages properly for Gemini API
             formatted_input = f"[{system_message['role']}]: {system_message['content']}\n\n[{user_message['role']}]: {user_message['content']}"
             
-            # Make API calls
+            # Make API calls with generation config
             if context.get("history"):
                 chat = self.model.start_chat(history=context["history"])
-                
-                if generation_config:
-                    response = chat.send_message(formatted_input, generation_config=generation_config)
-                else:
-                    response = chat.send_message(formatted_input)
+                response = chat.send_message(formatted_input, generation_config=generation_config)
             else:
-                if generation_config:
-                    response = self.model.generate_content(formatted_input, generation_config=generation_config)
-                else:
-                    response = self.model.generate_content(formatted_input)
+                response = self.model.generate_content(formatted_input, generation_config=generation_config)
             
             # Get actual token usage from Gemini response
             token_usage = {}
