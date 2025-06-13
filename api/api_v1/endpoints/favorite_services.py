@@ -63,13 +63,7 @@ async def add_favorite_service(
     
     db.add(db_favorite)
     
-    # Log the action
-    create_log(
-        db=db,
-        user_id=current_user_id,
-        log_type=0,  # info
-        description=f"Added mini-service '{mini_service.name}' to favorites"
-    )
+  
     
     db.commit()
     db.refresh(db_favorite)
@@ -109,15 +103,7 @@ async def remove_favorite_service(
     
     # Delete favorite
     db.delete(favorite)
-    
-    # Log the action
-    if mini_service:
-        create_log(
-            db=db,
-            user_id=current_user_id,
-            log_type=0,  # info
-            description=f"Removed mini-service '{mini_service.name}' from favorites"
-        )
+   
     
     db.commit()
 

@@ -741,7 +741,7 @@ async def upload_file(
         create_log(
             db=db,
             user_id=current_user_id,
-            log_type=0,
+            log_type=6, # 6: file upload
             description=f"Uploaded file: {file.filename} ({len(file_content)} bytes)"
         )
         
@@ -926,7 +926,7 @@ async def chat_generate_mini_service(
                     db=db,
                     user_id=current_user_id,
                     log_type=0,
-                    description=f"User approved and created mini-service '{service_data['name']}' with {len(created_agents)} agents"
+                    description=f"Created mini-service'{service_data['name']}' with {len(created_agents)} agents, by chatting"
                 )
                 
                 return {
@@ -1318,7 +1318,7 @@ async def create_chat_conversation(
     create_log(
         db=db,
         user_id=current_user_id,
-        log_type=0,
+        log_type=8,  # 8: create chat conversation
         description=f"Created chat conversation for mini-service: '{mini_service.name}'"
     )
     
@@ -1357,13 +1357,7 @@ async def update_chat_conversation(
     db.commit()
     db.refresh(conversation)
     
-    create_log(
-        db=db,
-        user_id=current_user_id,
-        log_type=0,
-        description=f"Updated chat conversation ID {conversation_id}"
-    )
-    
+  
     return conversation
 
 
@@ -1394,7 +1388,7 @@ async def delete_chat_conversation(
     create_log(
         db=db,
         user_id=current_user_id,
-        log_type=4,
+        log_type=7,  # 7: delete chat conversation
         description=f"Deleted chat conversation ID {conversation_id}"
     )
     

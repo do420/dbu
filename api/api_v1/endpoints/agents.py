@@ -346,20 +346,10 @@ async def create_agent_endpoint(
             response = model.generate_content(enhancement_request)
             enhanced_prompt = response.text.strip() if hasattr(response, "text") else str(response)
             is_enhanced = True
-            create_log(
-                db=db,
-                user_id=current_user_id,
-                log_type=2,
-                description=f"Enhanced system prompt for agent '{name}' using Gemini."
-            )
+            
         except Exception as e:
             logger.error(f"Failed to enhance system prompt: {str(e)}")
-            create_log(
-                db=db,
-                user_id=current_user_id,
-                log_type=2,
-                description=f"Failed to enhance system prompt for agent '{name}': {str(e)}"
-            )
+            
             enhanced_prompt = system_instruction
     # --- Create agent in database ---
     db_agent = Agent(
@@ -562,12 +552,7 @@ async def update_agent(
     db_agent.input_type = agent_update.input_type
     db_agent.output_type = agent_update.output_type
 
-    create_log(
-        db=db,
-        user_id=current_user_id,
-        log_type=1,  # 0: info
-        description=f"Updated agent '{agent_update.name}'"
-    )
+   
     
     db.commit()
     db.refresh(db_agent)
@@ -1516,12 +1501,7 @@ async def enhance_system_prompt(
         return {"enhanced_prompt": enhanced_prompt}
     except Exception as e:
         logger.error(f"Failed to enhance system prompt: {str(e)}")
-        create_log(
-            db=db,
-            user_id=current_user_id,
-            log_type=2,
-            description=f"Failed to enhance system prompt for agent '{agent_details['name']}': {str(e)}"
-        )
+        
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1657,12 +1637,7 @@ async def add_favorite_agent(
     db.commit()
     db.refresh(favorite)
     
-    create_log(
-        db=db,
-        user_id=current_user_id,
-        log_type=1,
-        description=f"Added agent '{agent.name}' to favorites"
-    )
+    
     
     return favorite
 
