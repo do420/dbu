@@ -7,6 +7,7 @@ from .openai_agent import OpenAIAgent
 
 from .tts_agent import TTSAgent
 from .bark_agent import BarkTTSAgent
+from .kokoro_agent import KokoroTTSAgent
 
 from .openai_image_generation_agent import OpenAIImageGeneration
 from .internet_research_agent import InternetResearchAgent
@@ -32,6 +33,8 @@ def create_agent(agent_type: str, config: Dict[str, Any], system_instruction: st
         return TTSAgent(config, system_instruction)
     elif agent_type.lower() == "bark_tts":
         return BarkTTSAgent(config, system_instruction)
+    elif agent_type.lower() == "kokoro_tts":
+        return KokoroTTSAgent(config, system_instruction)
     elif agent_type.lower() == "transcribe":
         return TranscribeAgent(config, system_instruction)
     elif agent_type.lower() == "dalle":

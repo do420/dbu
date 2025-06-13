@@ -429,7 +429,7 @@ async def list_mini_services(
 
         # Determine if any agent is external
         external_types = {"gemini", "openai"}
-        tts_types = {"transcribe", "tts", "bark_tts", "edge_tts"}
+        tts_types = {"transcribe", "tts", "bark_tts", "edge_tts", "kokoro_tts"}
         if agent_types and not (agent_types & external_types):
             # Only TTS/transcribe agents, show token usage as "-"
             mini_service_dict["average_token_usage"] = {key: "-" for key in mini_service_dict.get("average_token_usage", {})}
@@ -741,7 +741,7 @@ async def upload_file(
         create_log(
             db=db,
             user_id=current_user_id,
-            log_type=0,
+            log_type=6, # 6: file upload
             description=f"Uploaded file: {file.filename} ({len(file_content)} bytes)"
         )
         
@@ -926,7 +926,7 @@ async def chat_generate_mini_service(
                     db=db,
                     user_id=current_user_id,
                     log_type=0,
-                    description=f"User approved and created mini-service '{service_data['name']}' with {len(created_agents)} agents"
+                    description=f"Created mini-service'{service_data['name']}' with {len(created_agents)} agents, by chatting"
                 )
                 
                 return {
@@ -1063,6 +1063,8 @@ AVAILABLE AGENTS AND THEIR REQUIRED CONFIGURATIONS:
   Config: {{"voice": "en-US-AriaNeural", "rate": 0}}
 - bark_tts: High-quality TTS (text → sound, English only)
   Config: {{"voice_preset": "v2/en_speaker_6"}}
+- kokoro_tts: Neural TTS with multiple voices (text → sound)
+  Config: {{"voice": "af_sarah", "speed": 1.0, "language": "en-us"}}
 - transcribe: Audio to text (sound → text)
   Config: {{"model": "base"}}
 - gemini_text2image: Create images (text → image)
@@ -1318,7 +1320,7 @@ async def create_chat_conversation(
     create_log(
         db=db,
         user_id=current_user_id,
-        log_type=0,
+        log_type=8,  # 8: create chat conversation
         description=f"Created chat conversation for mini-service: '{mini_service.name}'"
     )
     
@@ -1357,13 +1359,7 @@ async def update_chat_conversation(
     db.commit()
     db.refresh(conversation)
     
-    create_log(
-        db=db,
-        user_id=current_user_id,
-        log_type=0,
-        description=f"Updated chat conversation ID {conversation_id}"
-    )
-    
+  
     return conversation
 
 
@@ -1394,7 +1390,7 @@ async def delete_chat_conversation(
     create_log(
         db=db,
         user_id=current_user_id,
-        log_type=4,
+        log_type=7,  # 7: delete chat conversation
         description=f"Deleted chat conversation ID {conversation_id}"
     )
     

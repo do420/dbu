@@ -1,0 +1,131 @@
+{
+  "kokoro_tts_examples": {
+    "single_text_mode": {
+      "description": "Convert a single text string to speech",
+      "api_endpoint": "/api/v1/agents/{agent_id}/kokoro-tts",
+      "method": "POST",
+      "example_request": {
+        "input": "Hello, this is a demonstration of Kokoro TTS technology. The voice sounds very natural and clear.",
+        "context": {
+          "voice": "af_sarah",
+          "speed": 1.0,
+          "language": "en-us",
+          "filename": "single_demo.wav"
+        }
+      },
+      "available_voices": [
+        "af_sarah", "af_nicole", "af_sky",
+        "am_adam", "am_michael",
+        "bf_emma", "bf_isabella", 
+        "bm_george", "bm_lewis"
+      ],
+      "speed_range": "0.5 to 2.0 (normal = 1.0)",
+      "supported_languages": ["en-us", "en-gb", "es", "fr", "de", "it", "pt", "ja", "ko", "zh"]
+    },
+    
+    "podcast_mode": {
+      "description": "Create podcast-style audio with multiple voices and automatic pauses",
+      "api_endpoint": "/api/v1/agents/{agent_id}/kokoro-tts",
+      "method": "POST",
+      "example_request_1": {
+        "input": [
+          {"voice": "af_sarah", "text": "Welcome to Tech Talk Daily! I'm your host Sarah."},
+          {"voice": "am_michael", "text": "And I'm Michael, your co-host. Today's topic is fascinating!"},
+          {"voice": "af_sarah", "text": "We're diving deep into neural text-to-speech technology."},
+          {"voice": "am_michael", "text": "The advances in this field are truly remarkable, Sarah."},
+          {"voice": "af_sarah", "text": "Absolutely! Let's explore what makes these systems so effective."},
+          {"voice": "am_michael", "text": "Great idea. The key is in the neural network architecture."},
+          {"voice": "af_sarah", "text": "Thanks for tuning in everyone. Until next time!"},
+          {"voice": "am_michael", "text": "Keep exploring technology!"}
+        ],
+        "context": {
+          "podcast_mode": true,
+          "min_pause_duration": 0.4,
+          "max_pause_duration": 1.2,
+          "speed": 1.0,
+          "filename": "tech_talk_episode.wav"
+        }
+      },
+      
+      "example_request_2": {
+        "input": {
+          "sentences": [
+            {"voice": "af_nicole", "text": "Breaking news this morning from the world of technology."},
+            {"voice": "am_adam", "text": "Scientists have achieved a new breakthrough in AI research."},
+            {"voice": "af_nicole", "text": "The implications for voice synthesis are enormous."},
+            {"voice": "am_adam", "text": "This could revolutionize how we interact with machines."},
+            {"voice": "af_nicole", "text": "We'll continue following this developing story."}
+          ]
+        },
+        "context": {
+          "podcast_mode": true,
+          "min_pause_duration": 0.3,
+          "max_pause_duration": 0.8,
+          "speed": 0.95
+        }
+      },
+      
+      "podcast_settings": {
+        "min_pause_duration": "Minimum pause between sentences (seconds) - default: 0.3",
+        "max_pause_duration": "Maximum pause between sentences (seconds) - default: 1.0", 
+        "speed": "Speech speed multiplier - default: 1.0",
+        "language": "Always 'en-us' for podcast mode",
+        "voice_requirements": "Each sentence must have 'voice' and 'text' fields"
+      },
+      
+      "common_voice_combinations": [
+        ["af_sarah", "am_michael"],
+        ["af_nicole", "am_adam"], 
+        ["bf_emma", "bm_george"],
+        ["af_sky", "bm_lewis"]
+      ]
+    },
+    
+    "agent_configuration": {
+      "agent_type": "kokoro_tts",
+      "required_config": {
+        "voice": "af_sarah",
+        "speed": 1.0,
+        "language": "en-us",
+        "model_path": "./model_files/kokkoro-82m/kokoro-v1.0.onnx",
+        "voices_path": "./model_files/kokkoro-82m/voices/voices-v1.0.bin"
+      },
+      "input_type": "text",
+      "output_type": "sound",
+      "system_instruction": "You are a text-to-speech agent that converts text to natural-sounding speech using Kokoro neural TTS. You support both single text conversion and podcast mode with multiple voices."
+    },
+    
+    "response_format": {
+      "single_mode": {
+        "output": "path/to/audio/file.wav",
+        "audio_file": "path/to/audio/file.wav", 
+        "audio_url": "/audio/filename.wav",
+        "voice": "af_sarah",
+        "voice_info": {"voice": "af_sarah", "speed": 1.0, "language": "en-us"},
+        "text_length": 125,
+        "agent_type": "kokoro_tts",
+        "sample_rate": 24000,
+        "token_usage": {}
+      },
+      
+      "podcast_mode": {
+        "output": "path/to/podcast/file.wav",
+        "audio_file": "path/to/podcast/file.wav",
+        "audio_url": "/audio/podcast_filename.wav", 
+        "voices_used": ["af_sarah", "am_michael"],
+        "voice_info": {
+          "mode": "podcast",
+          "voices_used": ["af_sarah", "am_michael"],
+          "sentence_count": 8,
+          "speed": 1.0,
+          "language": "en-us"
+        },
+        "text_length": 456,
+        "sentence_count": 8,
+        "agent_type": "kokoro_tts",
+        "sample_rate": 24000,
+        "token_usage": {}
+      }
+    }
+  }
+}

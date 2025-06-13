@@ -63,13 +63,25 @@ async def get_agent_types():
            
             
             
-        },
-        {
+        },        {
             "type": "bark_tts",
             "input_type": "text",
             "output_type": "sound",
             "api_key_required": "False",
             "endpoint": f"/agents/{{agent_id}}/bark-tts",
+            "fileFieldName": "input",
+            "supportedFileTypes": [],
+            "maxFileSize": 0,
+         
+            
+            
+        },
+        {
+            "type": "kokoro_tts",
+            "input_type": "text",
+            "output_type": "sound",
+            "api_key_required": "False",
+            "endpoint": f"/agents/{{agent_id}}/kokoro-tts",
             "fileFieldName": "input",
             "supportedFileTypes": [],
             "maxFileSize": 0,
@@ -346,20 +358,10 @@ async def create_agent_endpoint(
             response = model.generate_content(enhancement_request)
             enhanced_prompt = response.text.strip() if hasattr(response, "text") else str(response)
             is_enhanced = True
-            create_log(
-                db=db,
-                user_id=current_user_id,
-                log_type=2,
-                description=f"Enhanced system prompt for agent '{name}' using Gemini."
-            )
+            
         except Exception as e:
             logger.error(f"Failed to enhance system prompt: {str(e)}")
-            create_log(
-                db=db,
-                user_id=current_user_id,
-                log_type=2,
-                description=f"Failed to enhance system prompt for agent '{name}': {str(e)}"
-            )
+            
             enhanced_prompt = system_instruction
     # --- Create agent in database ---
     db_agent = Agent(
@@ -562,12 +564,7 @@ async def update_agent(
     db_agent.input_type = agent_update.input_type
     db_agent.output_type = agent_update.output_type
 
-    create_log(
-        db=db,
-        user_id=current_user_id,
-        log_type=1,  # 0: info
-        description=f"Updated agent '{agent_update.name}'"
-    )
+   
     
     db.commit()
     db.refresh(db_agent)
@@ -970,8 +967,7 @@ async def generate_bark_speech(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to generate audio file"
             )
-        
-        # Return the audio file
+          # Return the audio file
         filename = os.path.basename(audio_file_path)
         return FileResponse(
             path=audio_file_path,
@@ -992,6 +988,164 @@ async def generate_bark_speech(
             detail=f"Error processing with Bark TTS agent: {str(e)}"
         )
     
+
+@router.get("/voices/kokoro", response_model=List[str])
+async def list_kokoro_voices():
+    """List all available Kokoro TTS voice presets"""
+    from agents.kokoro_agent import KokoroTTSAgent
+    voices = KokoroTTSAgent.get_available_voices()
+    return voices
+
+@router.get("/languages/kokoro", response_model=List[str])
+async def list_kokoro_languages():
+    """List all supported Kokoro TTS languages"""
+    from agents.kokoro_agent import KokoroTTSAgent
+    languages = KokoroTTSAgent.get_supported_languages()
+    return languages
+
+@router.post("/{agent_id}/kokoro-tts", response_class=FileResponse)
+async def generate_kokoro_speech(
+    agent_id: int,
+    input_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user_id: int = None  # Replace with actual user ID from authentication
+):
+    """
+    Generate speech from text using the Kokoro TTS agent
+    
+    Supports two modes based on agent configuration:
+    1. Single text mode (podcast_mode: false): Convert a single text string to speech
+    2. Podcast mode (podcast_mode: true): Convert multiple sentences with different voices
+    
+    Single text mode example (agent config has podcast_mode: false):
+    {
+        "input": "Hello, this is a test of Kokoro TTS",
+        "context": {
+            "voice": "af_sarah",
+            "speed": 1.0,
+            "language": "en-us"
+        }
+    }
+    
+    Podcast mode example (agent config has podcast_mode: true):
+    {
+        "input": [
+            {"voice": "af_sarah", "text": "Hello and welcome to our podcast!"},
+            {"voice": "am_michael", "text": "Thanks for having me, Sarah!"},
+            {"voice": "af_sarah", "text": "Today we're discussing AI technology."}
+        ],
+        "context": {
+            "min_pause_duration": 0.3,
+            "max_pause_duration": 1.0,
+            "speed": 1.0
+        }
+    }
+    
+    Or with sentences in a dict (podcast mode):
+    {
+        "input": {
+            "sentences": [
+                {"voice": "af_sarah", "text": "Welcome everyone!"},
+                {"voice": "am_michael", "text": "Great to be here!"}
+            ]
+        },
+        "context": {
+            "min_pause_duration": 0.5,
+            "max_pause_duration": 1.2
+        }
+    }
+    
+    Available voices: af_sarah, af_nicole, af_sky, am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis
+    """
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="current_user_id parameter is required"
+        )
+    # Get the agent
+    db_agent = db.query(Agent).filter(
+        Agent.id == agent_id,
+        Agent.owner_id == current_user_id
+    ).first()
+    
+    if not db_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent with ID {agent_id} not found"
+        )
+    
+    # Verify this is a Kokoro TTS agent
+    if db_agent.agent_type not in ["kokoro_tts"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent with ID {agent_id} is not a Kokoro TTS agent"
+        )
+    
+    # Extract input text
+    input_text = input_data.get("input", "")
+    if not input_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Input text is required"
+        )
+   
+    
+    # Create agent instance
+    try:
+        agent_instance = create_agent(
+            db_agent.agent_type, 
+            db_agent.config, 
+            db_agent.system_instruction
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize Kokoro TTS agent {agent_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initialize Kokoro TTS agent {agent_id}: {str(e)}"
+        )
+    
+    # Process with the agent
+    try:
+        context = input_data.get("context", {})
+        # Add process_id to context
+        
+        result = await agent_instance.process(input_text, context)
+        
+        if "error" in result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["error"]
+            )
+        
+        # Get the path to the audio file
+        audio_file_path = result.get("audio_file")
+        
+        if not audio_file_path or not os.path.exists(audio_file_path):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate audio file"
+            )
+        
+        # Return the audio file
+        filename = os.path.basename(audio_file_path)
+        return FileResponse(
+            path=audio_file_path,
+            media_type="audio/wav",
+            filename=filename
+        )
+    except HTTPException:
+        # Clean up the process record
+       
+        raise
+    except Exception as e:
+        # Clean up the process record
+       
+        
+        logger.error(f"Error processing with Kokoro TTS agent: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing with Kokoro TTS agent: {str(e)}"
+        )
 
 
 @router.get("/models/transcribe", response_model=List[str])
@@ -1516,12 +1670,7 @@ async def enhance_system_prompt(
         return {"enhanced_prompt": enhanced_prompt}
     except Exception as e:
         logger.error(f"Failed to enhance system prompt: {str(e)}")
-        create_log(
-            db=db,
-            user_id=current_user_id,
-            log_type=2,
-            description=f"Failed to enhance system prompt for agent '{agent_details['name']}': {str(e)}"
-        )
+        
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1657,12 +1806,7 @@ async def add_favorite_agent(
     db.commit()
     db.refresh(favorite)
     
-    create_log(
-        db=db,
-        user_id=current_user_id,
-        log_type=1,
-        description=f"Added agent '{agent.name}' to favorites"
-    )
+    
     
     return favorite
 
