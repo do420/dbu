@@ -10,7 +10,6 @@ class GeminiAgent(BaseAgent):
     """Agent that uses Google's Gemini model
     
     Supported config parameters:
-    - api_key: Gemini API key (required)
     - model_name: Model name (default: "gemini-1.5-flash")
     - temperature: Controls randomness (0.0-2.0, default: 0.7)
     - top_p: Controls diversity via nucleus sampling (0.0-1.0, default: 0.8)

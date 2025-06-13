@@ -631,22 +631,31 @@ async def get_audio_by_process(
             detail=f"Process with ID {process_id} not found"
         )
     
-    # Construct the filename based on process ID
-    filename = f"process_{process_id}.mp3"
-    audio_path = os.path.join("_OUTPUT", filename)
+    # Check for both .mp3 and .wav files based on process ID
+    mp3_filename = f"process_{process_id}.mp3"
+    wav_filename = f"process_{process_id}.wav"
     
-    # Check if file exists
-    if not os.path.exists(audio_path):
+    mp3_path = os.path.join("_OUTPUT", mp3_filename)
+    wav_path = os.path.join("_OUTPUT", wav_filename)
+    
+    # Check which file exists
+    if os.path.exists(mp3_path):
+        return FileResponse(
+            path=mp3_path,
+            media_type="audio/mpeg",
+            filename=mp3_filename
+        )
+    elif os.path.exists(wav_path):
+        return FileResponse(
+            path=wav_path,
+            media_type="audio/wav",
+            filename=wav_filename
+        )
+    else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Audio file for process {process_id} not found"
         )
-    
-    return FileResponse(
-        path=audio_path,
-        media_type="audio/mpeg",
-        filename=filename
-    )
 
 
 @router.get("/{service_id}/audio", response_model=List[Dict[str, Any]])
