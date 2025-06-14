@@ -61,12 +61,47 @@ class GeminiAgent(BaseAgent):
                 "response_mime_type": self.config.get("response_mime_type", "text/plain")
             }
             
-            # Add response_schema if provided (only valid with application/json mime type)
-            if "response_schema" in self.config:
-                generation_config["response_schema"] = self.config["response_schema"]
+            # Add response_schema if provided (required for application/json and text/x.enum)
+            mime_type = self.config.get("response_mime_type", "text/plain")
             
-            # Remove None values and convert to GenerationConfig if needed
+            if mime_type in ["application/json", "text/x.enum"]:
+                if "response_schema" in self.config and self.config["response_schema"]:
+                    schema = self.config["response_schema"]
+                    # Validate that response_schema is a proper dict
+                    if isinstance(schema, dict) and schema:
+                        generation_config["response_schema"] = schema
+                        logger.debug(f"Added response_schema for {mime_type}: {schema}")
+                    else:
+                        logger.warning(f"Invalid response_schema format, ignoring: {schema}")
+                elif mime_type == "text/x.enum":
+                    # For ENUM, provide a default schema if none specified
+                    default_enum_schema = {
+                        "type": "string",
+                        "enum": ["option1", "option2", "option3"]
+                    }
+                    generation_config["response_schema"] = default_enum_schema
+                    logger.warning(f"No response_schema provided for text/x.enum, using default: {default_enum_schema}")
+                elif mime_type == "application/json":
+                    # For JSON, provide a default schema if none specified
+                    default_json_schema = {
+                        "type": "object",
+                        "properties": {
+                            "response": {"type": "string"}
+                        },
+                        "required": ["response"]
+                    }
+                    generation_config["response_schema"] = default_json_schema
+                    logger.warning(f"No response_schema provided for application/json, using default: {default_json_schema}")
+            
+            # Remove None values and validate config
             generation_config = {k: v for k, v in generation_config.items() if v is not None}
+            
+            # Additional validation
+            if "temperature" in generation_config:
+                temp = generation_config["temperature"]
+                if not isinstance(temp, (int, float)) or temp < 0 or temp > 2:
+                    logger.warning(f"Invalid temperature: {temp}, using default")
+                    generation_config["temperature"] = 0.7
             
             logger.debug(f"Using generation config: {generation_config}")
             
@@ -79,6 +114,53 @@ class GeminiAgent(BaseAgent):
                 response = chat.send_message(formatted_input, generation_config=generation_config)
             else:
                 response = self.model.generate_content(formatted_input, generation_config=generation_config)
+            
+            # Safely extract response text
+            response_text = ""
+            try:
+                # Method 1: Try accessing candidates directly (most reliable)
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'content') and candidate.content:
+                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                            response_text = candidate.content.parts[0].text or ""
+                            logger.debug(f"Extracted text from candidates: {len(response_text)} chars")
+                        else:
+                            logger.warning("Candidate content has no parts")
+                    else:
+                        logger.warning("Candidate has no content")
+                        # Check if candidate was blocked
+                        if hasattr(candidate, 'finish_reason'):
+                            finish_reason = candidate.finish_reason
+                            if finish_reason and finish_reason != "STOP":
+                                response_text = f"Content generation stopped: {finish_reason}"
+                
+                # Method 2: Try direct text access as fallback
+                elif hasattr(response, 'text'):
+                    try:
+                        response_text = response.text or ""
+                        logger.debug(f"Extracted text via response.text: {len(response_text)} chars")
+                    except NotImplementedError:
+                        logger.warning("response.text raised NotImplementedError")
+                        response_text = "Response text not available (NotImplementedError)"
+                    except Exception as text_err:
+                        logger.warning(f"Error accessing response.text: {text_err}")
+                        response_text = f"Error accessing response text: {str(text_err)}"
+                
+                # If still no text, check for blocking
+                if not response_text:
+                    if hasattr(response, 'prompt_feedback'):
+                        feedback = response.prompt_feedback
+                        if hasattr(feedback, 'block_reason') and feedback.block_reason:
+                            response_text = f"Content blocked: {feedback.block_reason}"
+                        else:
+                            response_text = "No text content returned from Gemini API"
+                    else:
+                        response_text = "Empty response from Gemini API"
+                        
+            except Exception as extraction_error:
+                logger.error(f"Error during text extraction: {extraction_error}")
+                response_text = f"Failed to extract response: {str(extraction_error)}"
             
             # Get actual token usage from Gemini response
             token_usage = {}
@@ -98,29 +180,47 @@ class GeminiAgent(BaseAgent):
                     logger.warning("Usage metadata not available, using estimation")
                     token_usage = {
                         "prompt_tokens": len(formatted_input.split()) * 1.3,  # Rough estimate
-                        "completion_tokens": len(response.text.split()) * 1.3,  # Rough estimate
-                        "total_tokens": len(formatted_input.split() + response.text.split()) * 1.3  # Rough estimate
+                        "completion_tokens": len(response_text.split()) * 1.3 if response_text else 0,  # Rough estimate
+                        "total_tokens": len(formatted_input.split()) * 1.3 + (len(response_text.split()) * 1.3 if response_text else 0)  # Rough estimate
                     }
             except Exception as e:
                 logger.warning(f"Error getting token usage: {e}, using estimation")
                 token_usage = {
                     "prompt_tokens": len(formatted_input.split()) * 1.3,  # Rough estimate
-                    "completion_tokens": len(response.text.split()) * 1.3,  # Rough estimate
-                    "total_tokens": len(formatted_input.split() + response.text.split()) * 1.3  # Rough estimate
+                    "completion_tokens": len(response_text.split()) * 1.3 if response_text else 0,  # Rough estimate
+                    "total_tokens": len(formatted_input.split()) * 1.3 + (len(response_text.split()) * 1.3 if response_text else 0)  # Rough estimate
                 }
             
-            logger.debug(f"GeminiAgent response received")
+            logger.debug(f"GeminiAgent response received successfully")
             return {
-                "output": response.text,
+                "output": response_text,
                 "raw_response": str(response),
                 "agent_type": "gemini",
                 "token_usage": token_usage
             }
         except Exception as e:
-            logger.error(f"Error with Gemini API: {str(e)}")
+            error_message = str(e)
+            exception_type = type(e).__name__
+            logger.error(f"Error with Gemini API: {error_message}")
+            logger.error(f"Exception type: {exception_type}")
+            
+            # More specific error messages
+            if exception_type == "NotImplementedError":
+                error_message = "Gemini API response format issue - content may have been blocked"
+            elif "API_KEY_INVALID" in error_message:
+                error_message = "Invalid Gemini API key"
+            elif "QUOTA_EXCEEDED" in error_message:
+                error_message = "Gemini API quota exceeded"
+            elif "PERMISSION_DENIED" in error_message:
+                error_message = "Permission denied for Gemini API"
+            elif "response_schema" in error_message and "missing field" in error_message:
+                error_message = "Invalid response schema configuration"
+            elif not error_message.strip():
+                error_message = "Unknown Gemini API error"
+            
             return {
-                "output": f"Error with Gemini API: {str(e)}",
-                "error": str(e),
+                "output": f"Error with Gemini API: {error_message}",
+                "error": error_message,
                 "agent_type": "gemini",
                 "token_usage": {"total_tokens": 0}
             }
