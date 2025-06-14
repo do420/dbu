@@ -69,6 +69,7 @@ class GeminiAgent(BaseAgent):
                     schema = self.config["response_schema"]
                     # Validate that response_schema is a proper dict
                     if isinstance(schema, dict) and schema:
+                        # Use the schema directly without cleaning
                         generation_config["response_schema"] = schema
                         logger.debug(f"Added response_schema for {mime_type}: {schema}")
                     else:
@@ -87,8 +88,7 @@ class GeminiAgent(BaseAgent):
                         "type": "object",
                         "properties": {
                             "response": {"type": "string"}
-                        },
-                        "required": ["response"]
+                        }
                     }
                     generation_config["response_schema"] = default_json_schema
                     logger.warning(f"No response_schema provided for application/json, using default: {default_json_schema}")
@@ -213,8 +213,8 @@ class GeminiAgent(BaseAgent):
                 error_message = "Gemini API quota exceeded"
             elif "PERMISSION_DENIED" in error_message:
                 error_message = "Permission denied for Gemini API"
-            elif "response_schema" in error_message and "missing field" in error_message:
-                error_message = "Invalid response schema configuration"
+            elif "response_schema" in error_message or "schema" in error_message.lower():
+                error_message = "Invalid response schema configuration - check schema format and remove unsupported fields"
             elif not error_message.strip():
                 error_message = "Unknown Gemini API error"
             
@@ -224,3 +224,4 @@ class GeminiAgent(BaseAgent):
                 "agent_type": "gemini",
                 "token_usage": {"total_tokens": 0}
             }
+    
