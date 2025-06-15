@@ -11,6 +11,30 @@ logger = logging.getLogger(__name__)
 class KokoroTTSAgent(BaseAgent):
     """Agent that converts text to speech using Kokoro ONNX"""
     
+    # Example JSON for podcast:
+
+    # {
+    # "sentences": [
+    #     {
+    #     "voice": "af_sarah",
+    #     "text": "Hello and welcome to AI Insights! I'm Sarah, and today we're exploring the incredible world of artificial intelligence."
+    #     },
+    #     {
+    #     "voice": "am_michael", 
+    #     "text": "Thanks Sarah! I'm Michael, and I'm excited to dive into this topic. AI seems to be everywhere these days."
+    #     },
+    #     {
+    #     "voice": "af_sarah",
+    #     "text": "Absolutely! From our smartphones to self-driving cars, AI is quietly revolutionizing how we live and work."
+    #     },
+    #     {
+    #     "voice": "am_michael",
+    #     "text": "It's fascinating how machine learning algorithms can find patterns in massive amounts of data that humans might never spot."
+    #     }
+    # ]
+    # }
+
+
     # Track whether models have been loaded
     _kokoro_instance = None
     def __init__(self, config: Dict[str, Any], system_instruction: str):
@@ -71,7 +95,24 @@ class KokoroTTSAgent(BaseAgent):
     async def process(self, input_data: Any, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Convert input text to speech using Kokoro and return path to audio file"""
         context = context or {}
-        
+        # Clean asterisks from input_data if it's a string
+        if isinstance(input_data, str):
+            input_data = input_data.replace('*', '')
+        elif isinstance(input_data, dict):
+            # Clean asterisks from string values in the dict
+            for key, value in input_data.items():
+                if isinstance(value, str):
+                    input_data[key] = value.replace('*', '')
+        elif isinstance(input_data, list):
+            # Clean asterisks from string items in the list
+            for i, item in enumerate(input_data):
+                if isinstance(item, str):
+                    input_data[i] = item.replace('*', '')
+                elif isinstance(item, dict):
+                    # Clean asterisks from string values in dict items
+                    for key, value in item.items():
+                        if isinstance(value, str):
+                            item[key] = value.replace('*', '')
         try:
             # Check if this is podcast mode (from config, not context)
             is_podcast_mode = self.podcast_mode
