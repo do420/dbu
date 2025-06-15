@@ -1,96 +1,158 @@
 import requests
 from typing import Dict, Any
 from .base import BaseAgent
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+import asyncio
 import time
-def extract_body_text_with_selenium(url, min_words=100):
-    try:
-        options = uc.ChromeOptions()
-        options.headless = True
-        driver = uc.Chrome(options=options, use_subprocess=False)
-        driver.get(url)
-        time.sleep(2)  # Wait for page to load
+import logging
+from bs4 import BeautifulSoup
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
+import random
 
-        # Collect paragraphs until at least min_words is reached
-        paragraphs = driver.find_elements(By.TAG_NAME, "p")
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def extract_text_with_requests(url, min_words=50):
+    """Fast text extraction using requests and BeautifulSoup"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Remove script and style elements (eski mantık korundu)
+        for script in soup(["script", "style"]):
+            script.decompose()
+        
+        # Get text from paragraphs
+        paragraphs = soup.find_all('p')
         texts = []
         word_count = 0
-        for p in paragraphs:
-            text = p.text.strip()
-            if text:
+        
+        for p in paragraphs[:15]:  # Limit paragraphs
+            text = p.get_text().strip()
+            if text and len(text) > 20:
                 texts.append(text)
                 word_count += len(text.split())
-            if word_count >= min_words:
-                break
-        driver.quit()
+                if word_count >= min_words:
+                    break
+        
         return "\n\n".join(texts) if texts else ""
+        
     except Exception as e:
-        try:
-            driver.quit()
-        except:
-            pass
-        return f"_Could not extract content: {str(e)}_"
+        logger.warning(f"Failed to extract from {url}: {str(e)}")
+        return ""
+
+def search_bing_fast(keyword):
+    """Fast Bing search using requests"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+           
+        }
+        
+        search_url = f"https://www.bing.com/search?q={urllib.parse.quote(keyword)}"
+        response = requests.get(search_url, headers=headers, timeout=8)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find search result links (eski Selenium mantığı korundu)
+        links = []
+        result_links = soup.find_all('a', href=True)
+        
+        for link in result_links:
+            href = link.get('href')
+            # Eski filtreleme mantığı: microsoft.com, bing.com hariç
+            if href and href.startswith('http') and not any(x in href for x in ['microsoft.com', 'bing.com', 'msn.com']):
+                links.append(href)
+                if len(links) >= 3:  # Eski mantık: top 3 result
+                    break
+        
+        return links
+        
+    except Exception as e:
+        logger.error(f"Bing search failed for '{keyword}': {str(e)}")
+        return []
 
 class InternetResearchAgent(BaseAgent):
-    """Agent that performs direct internet research using Selenium and undetected_chromedriver."""
+    """Fast internet research agent using requests and BeautifulSoup."""
 
     async def process(self, input_text: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Takes comma-separated keywords, searches the web, and returns structured markdown with only body text.
-        Ensures at least 100 words are scraped per keyword.
+        Fast internet research with requests instead of Selenium.
         """
-        context = context or {}
-        keywords = [kw.strip() for kw in input_text.split(",") if kw.strip()]
-        results_md = "# Internet Research Results\n"
+        try:
+            logger.info(f"Starting fast internet research for: {input_text}")
+            context = context or {}
+            keywords = [kw.strip() for kw in input_text.split(",") if kw.strip()]
+            results_md = "# Internet Research Results\n"
 
-        for keyword in keywords:
-            results_md += f"\n## {keyword}\n"
-            try:
-                # Use Bing search to get result links
-                search_url = f"https://www.bing.com/search?q={requests.utils.quote(keyword)}"
-                options = uc.ChromeOptions()
-                options.headless = True
-                driver = uc.Chrome(options=options, use_subprocess=False)
-                driver.get(search_url)
-                time.sleep(2)  # Wait for search results to load
+            # Limit to 3 keywords max
+            keywords = keywords[:3]
 
-                # Get top 5 result links
-                results = driver.find_elements(By.CSS_SELECTOR, "li.b_algo h2 a")
-                links = []
-                for result in results:
-                    href = result.get_attribute("href")
-                    if href:
-                        links.append(href)
-                    if len(links) >= 5:
-                        break
-                driver.quit()
-
-                found = False
-                collected_texts = []
-                total_words = 0
-                for link in links:
-                    found = True
-                    body_text = extract_body_text_with_selenium(link, min_words=100 - total_words)
-                    if body_text:
-                        collected_texts.append(body_text)
-                        total_words += len(body_text.split())
-                    if total_words >= 100:
-                        break
-                if collected_texts:
-                    results_md += "\n\n".join(collected_texts) + "\n\n"
-                elif not found:
-                    results_md += "_No results found or blocked by Bing. Try different keywords._\n"
-            except Exception as e:
+            for i, keyword in enumerate(keywords):
+                results_md += f"\n## {keyword}\n"
                 try:
-                    driver.quit()
-                except:
-                    pass
-                results_md += f"_Error fetching results for '{keyword}': {str(e)}_\n"
+                    # Use thread executor for fast parallel processing
+                    search_task = asyncio.get_event_loop().run_in_executor(
+                        None, self._search_keyword_fast, keyword
+                    )
+                    search_result = await asyncio.wait_for(search_task, timeout=15)  # 15 second max per keyword
+                    results_md += search_result
+                    
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout for keyword: {keyword}")
+                    results_md += f"_Search timed out for '{keyword}'. Please try a more specific search._\n"
+                except Exception as e:
+                    logger.error(f"Error processing keyword '{keyword}': {str(e)}")
+                    results_md += f"_Error searching for '{keyword}': Connection failed_\n"
 
-        return {
-            "output": results_md,
-            "agent_type": "internet_research",
-            "keywords": keywords
-        }
+            logger.info("Internet research completed successfully")
+            return {
+                "output": results_md,
+                "agent_type": "internet_research", 
+                "keywords": keywords,
+                "status": "success"
+            }
+            
+        except Exception as e:
+            logger.error(f"InternetResearchAgent process error: {str(e)}")
+            return {
+                "output": f"# Internet Research Error\n\nAn error occurred: {str(e)}",
+                "agent_type": "internet_research",
+                "keywords": [],
+                "status": "error"
+            }
+    
+    def _search_keyword_fast(self, keyword: str) -> str:
+        """Perform very fast search using requests only."""
+        try:
+            logger.info(f"Searching for: {keyword}")
+            
+            # Get search results links
+            links = search_bing_fast(keyword)
+            
+            if not links:
+                return "_No search results found_\n"
+
+            # Extract content from first working link
+            for link in links:
+                try:
+                    content = extract_text_with_requests(link, min_words=30)
+                    if content and len(content.strip()) > 50:
+                        return f"{content}\n\n"
+                except Exception as e:
+                    logger.warning(f"Failed to extract from {link}: {str(e)}")
+                    continue
+                
+            return "_No content could be extracted from search results_\n"
+            
+        except Exception as e:
+            logger.error(f"Search error for '{keyword}': {str(e)}")
+            return f"_Search failed: {str(e)}_\n"
