@@ -21,6 +21,7 @@ def extract_text_with_requests(url, min_words=50):
         }
         
         response = requests.get(url, headers=headers, timeout=5)
+        response.encoding = response.apparent_encoding
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
