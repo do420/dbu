@@ -6,12 +6,12 @@ import PyPDF2
 import docx
 
 class DocumentParserAgent(BaseAgent):
-    """Agent that parses PDF and Word files and outputs their text."""
+    """Agent that parses PDF, Word, and text files and outputs their text."""
 
     async def process(self, input_data: Any, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Args:
-            input_data: Path to the document file (PDF or DOCX)
+            input_data: Path to the document file (PDF, DOCX, or TXT)
         Returns:
             Dict with extracted text
         """
@@ -53,6 +53,8 @@ class DocumentParserAgent(BaseAgent):
                 text = self._parse_pdf(file_path)
             elif ext in [".docx", ".doc"]:
                 text = self._parse_docx(file_path)
+            elif ext == ".txt":
+                text = self._parse_txt(file_path)
             else:
                 return {
                     "output": f"Unsupported file type: {ext}",
@@ -83,3 +85,17 @@ class DocumentParserAgent(BaseAgent):
     def _parse_docx(self, file_path: str) -> str:
         doc = docx.Document(file_path)
         return "\n".join([para.text for para in doc.paragraphs]).strip()
+
+    def _parse_txt(self, file_path: str) -> str:
+        """Parse a plain text file."""
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except UnicodeDecodeError:
+            # Try with different encodings if UTF-8 fails
+            try:
+                with open(file_path, "r", encoding="latin-1") as f:
+                    return f.read().strip()
+            except Exception:
+                with open(file_path, "r", encoding="cp1252") as f:
+                    return f.read().strip()
